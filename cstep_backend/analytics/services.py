@@ -8,7 +8,6 @@ from accounts.models import User,Gender,OrganisationType
 from events.models import Event, BroadcastSession, ViewerSession, Feedback, ScheduleItem, ScheduleItemType, EventDay
 from registrations.models import Registration, RegistrationDay, RegistrationSession
 from registrations.constants import RegistrationStatus, AttendanceMode
-from .serializers import LiveAnalyticsPayloadSerializer
 
 GENDER_LABELS = dict(Gender.choices)
 ORG_TYPE_LABELS = dict(OrganisationType.choices)
