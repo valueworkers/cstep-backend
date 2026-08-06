@@ -21,7 +21,6 @@ def get_user_from_token(token: str):
  
 class JWTAuthMiddleware(BaseMiddleware):
     async def __call__(self, scope, receive, send):
-        async def __call__(self, scope, receive, send):
         query_string = scope.get("query_string", b"").decode()
 
         query_params = parse_qs(query_string)
