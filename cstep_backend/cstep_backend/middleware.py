@@ -1,7 +1,7 @@
 from channels.middleware import BaseMiddleware
 from channels.db import database_sync_to_async
 from django.contrib.auth.models import AnonymousUser
- 
+from urllib.parse import parse_qs
  
 @database_sync_to_async
 def get_user_from_token(token: str):
