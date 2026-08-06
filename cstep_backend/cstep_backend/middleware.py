@@ -21,23 +21,17 @@ def get_user_from_token(token: str):
  
 class JWTAuthMiddleware(BaseMiddleware):
     async def __call__(self, scope, receive, send):
-        headers = dict(scope.get("headers", []))
+        async def __call__(self, scope, receive, send):
+        query_string = scope.get("query_string", b"").decode()
 
-        auth_header = headers.get(b"authorization")
+        query_params = parse_qs(query_string)
+        token = query_params.get("token", [None])[0]
 
-        if auth_header:
+        if token:
             try:
-                auth_header = auth_header.decode("utf-8")
-
-                if auth_header.startswith("Bearer "):
-                    token = auth_header.split(" ", 1)[1]
-                    scope["user"] = await get_user_from_token(token)
-                else:
-                    scope["user"] = AnonymousUser()
-
+                scope["user"] = await get_user_from_token(token)
             except Exception:
                 scope["user"] = AnonymousUser()
-
         else:
             scope["user"] = AnonymousUser()
 
