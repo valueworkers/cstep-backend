@@ -7,7 +7,7 @@ from asgiref.sync import async_to_sync
 from events.models import Event
 from events.constants import EventStatus
 from .services import LiveAnalyticsService
-from .registry import get_active_event_ids
+from .registry import get_active_event_ids, get_requested_visuals
 
 logger = logging.getLogger(__name__)
 
@@ -20,12 +20,14 @@ def push_live_analytics():
     events_qs = Event.objects.filter(status=EventStatus.LIVE)
     if active_ids is not None:
         events_qs = events_qs.filter(id__in=active_ids)
-    # else: registry read failed — fall back to all live events rather than
-    # silently going quiet for every event.
 
     for event in events_qs:
+        requested = get_requested_visuals(event.id)
+        if not requested:
+            continue  # nobody subscribed to anything for this event — skip DB work + broadcast
+
         try:
-            payload = LiveAnalyticsService(event).build_payload(visuals=None)
+            payload = LiveAnalyticsService(event).build_payload(visuals=requested)
         except Exception:
             logger.exception("push_live_analytics: failed building payload for event %s", event.id)
             continue
