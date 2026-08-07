@@ -440,3 +440,27 @@ class Feedback(models.Model):
     def __str__(self):
         target = "Overall" if self.is_overall_rating else str(self.schedule_item)
         return f"{self.user} — {target} — {self.rating}"
+
+class ChatMessage(models.Model):
+    event = models.ForeignKey(
+        "events.Event",
+        on_delete=models.CASCADE,
+        related_name="chat_messages",
+    )
+
+    sender = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="chat_messages",
+    )
+
+    message = models.TextField()
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    edited_at = models.DateTimeField(null=True, blank=True)
+
+    is_deleted = models.BooleanField(default=False)
+
+    class Meta:
+        ordering = ["created_at"]

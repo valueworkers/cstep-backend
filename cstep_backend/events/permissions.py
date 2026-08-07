@@ -1,4 +1,5 @@
 from rest_framework.permissions import BasePermission, SAFE_METHODS
+MODERATOR_ROLES = {"MODERATOR", "EVENT_ADMIN", "SUPER_ADMIN"}
 
 class IsEventAdminOrAbove(BasePermission):
     """EVENT_ADMIN or SUPER_ADMIN only."""
@@ -10,9 +11,7 @@ class IsEventAdminOrAbove(BasePermission):
 
 class IsModeratorOrAbove(BasePermission):
     def has_permission(self, request, view):
-        return request.user.is_authenticated and request.user.role in (
-            "MODERATOR", "EVENT_ADMIN", "SUPER_ADMIN"
-        )
+        return request.user.is_authenticated and request.user.role in MODERATOR_ROLES
 
 
 class IsAuthenticatedViewer(BasePermission):

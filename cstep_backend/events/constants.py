@@ -1,5 +1,15 @@
 from django.db import models
 
+class ChatReactionType(models.TextChoices):
+    LIKE = "like", "👍"
+    LOVE = "love", "❤️"
+    CLAP = "clap", "🙌"
+
+MIN_SECONDS_BETWEEN_MESSAGES = 1.0
+MAX_MESSAGE_LENGTH = 500
+EDIT_WINDOW_SECONDS = 15 * 60        # 15 minutes to edit, like WhatsApp
+DELETE_WINDOW_SECONDS = 60 * 60      # 1 hour to delete your own message
+
 class EventStatus(models.TextChoices):
     DRAFT = "DRAFT", "Draft"
     SCHEDULED = "SCHEDULED", "Scheduled"

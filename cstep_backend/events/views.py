@@ -14,7 +14,7 @@ from accounts.models import UserRole
 from .constants import ScheduleItemType
 
 from .utils import _get_peak_viewers, _send_ws_event
-from .models import Event, EventDay, EventStatus, BroadcastSession, ScheduleItem, Feedback, ViewerSession
+from .models import Event, EventDay, EventStatus, BroadcastSession, ScheduleItem, Feedback, ViewerSession,ChatMessage
 from registrations.models import Registration
 from registrations.constants import RegistrationStatus
 
@@ -751,3 +751,29 @@ class FeedbackViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         serializer.save(user=self.request.user)
+
+class ChatMessageViewSet(viewsets.ModelViewSet):
+    """
+    Read-only + moderation endpoint. Posting new messages happens over the
+    WebSocket (ChatConsumer), not here — this covers history pagination on
+    initial page load and admin-side message deletion.
+    """
+    serializer_class = ChatMessageSerializer
+    http_method_names = ["get", "delete"]
+
+    def get_queryset(self):
+        qs = ChatMessage.objects.filter(is_deleted=False).select_related("sender")
+        event_id = self.request.query_params.get("event")
+        if event_id:
+            qs = qs.filter(event_id=event_id)
+        return qs
+
+    def get_permissions(self):
+        if self.action == "destroy":
+            return [IsAuthenticated()]
+        return [IsAuthenticated()]
+
+    def perform_destroy(self, instance):
+        instance.is_deleted = True
+        instance.edited_at = timezone.now()
+        instance.save(update_fields=["is_deleted", "edited_at"])

@@ -11,6 +11,7 @@ from .models import (
     RecordingStatus,
     EventDay,
     ScheduleItem,
+    ChatMessage,
 )
 from .constants import EventScheduleType
 from .media import build_ingest_urls, build_playback_urls
@@ -583,3 +584,16 @@ class FeedbackSerializer(serializers.ModelSerializer):
         return qs.exists()
 
 
+ 
+class ChatMessageSerializer(serializers.ModelSerializer):
+    sender_id = serializers.IntegerField(source="sender.id", read_only=True)
+    sender_name = serializers.SerializerMethodField()
+ 
+    class Meta:
+        model = ChatMessage
+        fields = ["id", "event", "sender_id", "sender_name", "message", "created_at", "edited_at", "is_deleted"]
+        read_only_fields = ["event", "created_at", "edited_at", "is_deleted"]
+ 
+    def get_sender_name(self, obj):
+        return obj.sender.full_name()
+ 
