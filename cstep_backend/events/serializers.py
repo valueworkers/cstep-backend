@@ -164,6 +164,7 @@ class EventDetailSerializer(EventListSerializer):
             "name": session.name,
             "is_primary": session.is_primary,
             "is_active": session.is_active,
+            "playback_url": session.playback_url,
             "playback_urls": build_playback_urls(session.stream_key),
             "started_at": session.started_at,
             "ended_at": session.ended_at,
@@ -244,11 +245,13 @@ class BroadcastSessionSerializer(serializers.ModelSerializer):
         model = BroadcastSession
         fields = [
             "id", "event", "event_title", "broadcaster", "broadcaster_name",
-            "name", "is_primary", "stream_key", "ingest_urls", "playback_urls",
+            "name", "is_primary", "stream_key", "ingest_url", "playback_url",
+            "ingest_urls", "playback_urls",
             "allow_viewer_recording", "is_recording", "recordings",
             "is_active", "started_at", "ended_at", "created_at",
         ]
         read_only_fields = [
+            "ingest_url", "playback_url",
             "stream_key", "ingest_urls", "playback_urls",
             "is_recording", "recordings", "is_active",
             "started_at", "ended_at", "created_at",
