@@ -1,8 +1,3 @@
-# Ephemeral reaction counters. Not persisted to Postgres — lives entirely in
-# Redis as a hash per event: event:{id}:chat:reactions -> {like: N, love: N, clap: N}
-#
-# Assumes settings.REDIS_URL is defined (adjust if you use a different var,
-# e.g. settings.CHANNEL_REDIS_URL or a django-redis cache alias).
 
 import redis
 from django.conf import settings
