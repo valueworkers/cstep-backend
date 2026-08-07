@@ -84,7 +84,7 @@ class BroadcastSessionAdmin(admin.ModelAdmin):
     list_filter = ("is_primary", "is_active", "is_recording")
     search_fields = ("name", "event__title", "stream_key")
     autocomplete_fields = ("event", "broadcaster")
-    readonly_fields = ("stream_key", "ingest_url", "playback_url", "created_at")
+    readonly_fields = ("stream_key", "created_at")
 
 
 @admin.register(ViewerSession)

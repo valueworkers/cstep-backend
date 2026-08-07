@@ -222,18 +222,16 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
 
-ALLOWED_HOSTS = [
-    "168.144.95.80",
-]
+ALLOWED_HOSTS = ["*"]
 
 CSRF_TRUSTED_ORIGINS = [
-    "http://localhost:3000/",
-    "https://icas2026.cstep.in/",
+    "http://localhost:3000",
+    "https://icas2026.cstep.in",
 ]
 
 CORS_ALLOWED_ORIGINS = [
-    "http://localhost:3000/",
-    "https://icas2026.cstep.in/",
+    "http://localhost:3000",
+    "https://icas2026.cstep.in",
 ]
 
 CORS_ALLOW_CREDENTIALS = True
