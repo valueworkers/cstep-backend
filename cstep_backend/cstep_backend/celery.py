@@ -15,10 +15,11 @@ app.conf.beat_schedule = {
         "task": "analytics.tasks.push_live_analytics",
         "schedule": 15.0,  # every 15 seconds
     },
-    "generate-reminders": {
-        "task": "notification.tasks.generate_reminders",
-        "schedule": 300.0,  # every 5 minutes — keep <= REMINDER_CHECK_WINDOW_MINUTES in constants.py
-    },
+
+    "generate-event-reminders": {
+        "task": "notification.tasks.generate_event_reminders",
+        "schedule": 30.0,  # every 5 minutes
+    }
 }
 
 
