@@ -412,18 +412,22 @@ class EventViewerViewSet(viewsets.GenericViewSet):
         if event.status != EventStatus.LIVE:
             return Response({"detail": "Event is not currently live."}, status=status.HTTP_400_BAD_REQUEST)
 
-        location = ViewerSessionLocationSerializer(data=request.data)
+        location = ViewerSessionLocationSerializer(data=request.data, context={"event": event})
         location.is_valid(raise_exception=True)
+
+        validated = dict(location.validated_data)
+        session_id = validated.pop("session_id", None)
 
         ViewerSession.objects.filter(event=event, user=request.user, left_at=None).update(
             left_at=timezone.now()
         )
 
-        session = ViewerSession.objects.create(
+        viewer_session = ViewerSession.objects.create(
             user=request.user,
             event=event,
+            session_id=session_id,
             user_agent=request.META.get("HTTP_USER_AGENT", ""),
-            **location.validated_data,
+            **validated,
         )
 
         concurrent = event.viewer_sessions.filter(left_at=None).count()
@@ -431,9 +435,11 @@ class EventViewerViewSet(viewsets.GenericViewSet):
 
         payload = {
             "event_id": event.id,
+            "day_id": viewer_session.day_id,
+            "session_id": viewer_session.session_id,
             "event_title": event.title,
             "broadcast_sessions": event.broadcast_sessions.all(),
-            "viewer_session_id": session.id,
+            "viewer_session_id": viewer_session.id,
             "concurrent_viewers": concurrent,
             "video_muted_by_default": event.video_muted_by_default,
         }

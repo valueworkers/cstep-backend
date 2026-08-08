@@ -18,6 +18,7 @@ urlpatterns = [
     path("events/", include("events.urls")),
     path("registrations/", include("registrations.urls")),
     path("analytics/", include("analytics.urls")),
+    path("notification/", include("notification.urls")),
 ]
 
 urlpatterns += static(settings.STATIC_URL, document_root=settings.STATIC_ROOT)

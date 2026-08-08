@@ -312,7 +312,7 @@ class ViewerSession(models.Model):
         settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="viewer_sessions"
     )
     event = models.ForeignKey(Event, on_delete=models.CASCADE, related_name="viewer_sessions")
-    day = models.ForeignKey(  # NEW
+    day = models.ForeignKey(
         EventDay, on_delete=models.SET_NULL, null=True, blank=True,
         related_name="viewer_sessions"
     )
