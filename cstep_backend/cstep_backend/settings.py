@@ -33,6 +33,7 @@ INSTALLED_APPS = [
     "events",
     "registrations",
     "analytics",
+    "notification",
 ]
 
 MIDDLEWARE = [
