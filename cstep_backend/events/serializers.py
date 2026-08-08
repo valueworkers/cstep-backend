@@ -365,36 +365,35 @@ class EndStreamSerializer(serializers.Serializer):
 
 # ViewerSession
 class ViewerSessionSerializer(serializers.ModelSerializer):
-    user_name = serializers.SerializerMethodField()
+    user_name = serializers.CharField(source="user.full_name", read_only=True)
     watch_duration_minutes = serializers.SerializerMethodField()
+    day_date = serializers.CharField(source="day.date", read_only=True, default=None)
+    session_title = serializers.CharField(source="session.title", read_only=True, default=None)
 
     class Meta:
         model = ViewerSession
         fields = [
             "id", "user", "user_name", "event",
+            "day", "day_date", "session", "session_title",
             "joined_at", "left_at", "is_active",
             "watch_duration_seconds", "watch_duration_minutes",
             "last_heartbeat", "ip_address", "latitude", "longitude",
-            "location_accuracy", "state","country",
+            "location_accuracy", "state", "country",
         ]
         read_only_fields = fields
 
-    def get_user_name(self, obj):
-        return f"{obj.user.first_name} {obj.user.last_name}"
-
     def get_watch_duration_minutes(self, obj):
         return round(obj.watch_duration_seconds / 60, 1)
-
+    
 class ViewerSessionLocationSerializer(serializers.Serializer):
-    """Input validation for POST /events/{id}/join/ — previously the view
-    only ran serializer.is_valid() with no bounds/consistency checks."""
+    """Input validation for POST /events/{id}/join/."""
     ip_address = serializers.IPAddressField()
+    session_id = serializers.IntegerField(required=False, allow_null=True)
     latitude = serializers.DecimalField(max_digits=9, decimal_places=6, required=False, allow_null=True)
     longitude = serializers.DecimalField(max_digits=9, decimal_places=6, required=False, allow_null=True)
     location_accuracy = serializers.FloatField(required=False, allow_null=True)
     state = serializers.CharField(required=False, allow_blank=True, max_length=100)
     country = serializers.CharField(required=False, allow_blank=True, max_length=100)
-
 
     def validate_latitude(self, value):
         if value is not None and not (-90 <= value <= 90):
@@ -404,6 +403,14 @@ class ViewerSessionLocationSerializer(serializers.Serializer):
     def validate_longitude(self, value):
         if value is not None and not (-180 <= value <= 180):
             raise serializers.ValidationError("Longitude must be between -180 and 180.")
+        return value
+
+    def validate_session_id(self, value):
+        if value is None:
+            return value
+        event = self.context["event"]
+        if not event.schedule_items.filter(pk=value).exists():
+            raise serializers.ValidationError("Session not found for this event.")
         return value
 
     def validate(self, attrs):
@@ -416,14 +423,16 @@ class ViewerSessionLocationSerializer(serializers.Serializer):
                 {"location_accuracy": "Requires latitude/longitude to be set."}
             )
         return attrs
-
+    
 class ViewerJoinSerializer(serializers.Serializer):
     event_id = serializers.IntegerField()
+    day_id = serializers.IntegerField(allow_null=True)
+    session_id = serializers.IntegerField(allow_null=True)
     event_title = serializers.CharField()
     broadcast_sessions = BroadcastSessionSerializer(many=True)
     viewer_session_id = serializers.IntegerField()
     concurrent_viewers = serializers.IntegerField()
-    video_muted_by_default = serializers.BooleanField()
+    video_muted_by_default = serializers.BooleanField()\
 
 class HeartbeatSerializer(serializers.Serializer):
     """Validates session state for POST /events/{id}/heartbeat/ and formats
