@@ -1,159 +1,109 @@
-from datetime import datetime, timedelta
+# tasks.py
+from datetime import timedelta
 
 from celery import shared_task
-from django.conf import settings
-from django.contrib.contenttypes.models import ContentType
-from django.db import transaction
 from django.utils import timezone
 
-from events.constants import ScheduleItemType
-from events.models import Event, ScheduleItem
+from events.models import Event
 from registrations.constants import RegistrationStatus
-from registrations.models import Registration, RegistrationSession
+from registrations.models import Registration
 
-from .constants import (
-    DeliveryStatus,
-    NotificationChannel,
-    REMINDER_CHECK_WINDOW_MINUTES,
-    ReminderTarget,
-)
-from .models import Notification, ReminderRule, ScheduledReminder
-from .services import NotificationService
+from .constants import NotificationChannel, NotificationType
+from .models import Notification
+from .services import notify
+
+# How often generate_event_reminders is expected to run via Celery beat.
+# Keep this <= the smallest gap between entries in REMINDER_OFFSETS_MINUTES.
+REMINDER_CHECK_WINDOW_MINUTES = 15
+
+# (minutes_before_event_start, human label). Label doubles as the dedupe key
+# (see generate_event_reminders) and gets baked into the notification title.
+REMINDER_OFFSETS_MINUTES = [
+    (24 * 60, "24 hours before"),
+    (60, "1 hour before"),
+]
+
+REMINDER_CHANNELS = [NotificationChannel.EMAIL, NotificationChannel.IN_APP]
 
 
 @shared_task(bind=True, max_retries=3, default_retry_delay=60)
-def send_notification(self, notification_id):
-    """Delivers a single Notification row over its channel. Idempotent."""
+def send_notification_async(self, user_id, notification_type, channels, title="", body="", event_id=None):
+    """
+    Async wrapper around services.notify(). Creates + delivers the
+    Notification row(s) inside the worker instead of blocking the caller
+    (e.g. call this from a view or signal instead of notify() directly
+    when you don't want to eat SMTP/SMS latency inline).
+    """
+    from django.contrib.auth import get_user_model
+
+    User = get_user_model()
     try:
-        notification = Notification.objects.select_related("user").get(pk=notification_id)
-    except Notification.DoesNotExist:
+        user = User.objects.get(pk=user_id)
+    except User.DoesNotExist:
         return
 
-    if notification.status == DeliveryStatus.SENT:
-        return
+    event = None
+    if event_id is not None:
+        try:
+            event = Event.objects.get(pk=event_id)
+        except Event.DoesNotExist:
+            pass
 
     try:
-        if notification.channel == NotificationChannel.EMAIL:
-            _send_email(notification)
-        elif notification.channel == NotificationChannel.SMS:
-            _send_sms(notification)
-        # IN_APP has nothing further to do — the row itself *is* the delivery.
-
-        notification.status = DeliveryStatus.SENT
-        notification.sent_at = timezone.now()
-        notification.save(update_fields=["status", "sent_at", "updated_at"])
-
+        notify(user, notification_type, channels, title=title, body=body, event=event)
     except Exception as exc:
-        notification.status = DeliveryStatus.FAILED
-        notification.error_message = str(exc)[:500]
-        notification.retry_count += 1
-        notification.save(update_fields=["status", "error_message", "retry_count", "updated_at"])
         raise self.retry(exc=exc)
 
 
-def _send_email(notification):
-    from django.core.mail import send_mail
-
-    if not notification.user.email:
-        raise ValueError("User has no email address on file.")
-    send_mail(
-        subject=notification.title or notification.notification_type,
-        message=notification.body,
-        from_email=settings.DEFAULT_FROM_EMAIL,
-        recipient_list=[notification.user.email],
-        fail_silently=False,
-    )
-
-
-def _send_sms(notification):
-    from .sms import send_sms  # raises sms.Fast2SMSError on failure
-
-    user = notification.user
-    if not user.phone_number:
-        raise ValueError("User has no phone number on file.")
-    send_sms(to=f"{user.country_code}{user.phone_number}", message=notification.body)
-
-
 @shared_task
-def generate_reminders():
+def generate_event_reminders():
     """
-    Run every REMINDER_CHECK_WINDOW_MINUTES (or more often) via Celery
-    beat. Evaluates active ReminderRules against upcoming Event/ScheduleItem
-    start times and queues reminder notifications for registered users.
-    ScheduledReminder rows make this safe to run repeatedly / on overlapping
-    windows without double-sending.
+    Run every REMINDER_CHECK_WINDOW_MINUTES via Celery beat. For each
+    upcoming Event and each hardcoded offset in REMINDER_OFFSETS_MINUTES,
+    fires an EVENT_REMINDER notification to every ACCEPTED registrant
+    whose reminder window is currently open.
+
+    Dedup: Notification no longer carries a reminder-tracking row, so we
+    key on (user, event, notification_type, title) - the title bakes in
+    the offset label so the 24h and 1h reminders never collide with each
+    other, and an existing row with that exact title means it already went out.
     """
     now = timezone.now()
-    rules = ReminderRule.objects.filter(is_active=True).select_related("event")
-
-    for rule in rules:
-        for target, user, context in _resolve_targets(rule, now):
-            _fire_once(rule, target, user, context)
-
-
-def _fire_once(rule, target, user, context):
-    content_type = ContentType.objects.get_for_model(target)
-    already_sent = ScheduledReminder.objects.filter(
-        reminder_rule=rule, user=user, content_type=content_type, object_id=target.pk
-    ).exists()
-    if already_sent:
-        return
-
-    with transaction.atomic():
-        # Row-level lock via get_or_create prevents two concurrent beat
-        # runs from both winning the dedup check and double-sending.
-        _, created = ScheduledReminder.objects.get_or_create(
-            reminder_rule=rule, user=user, content_type=content_type, object_id=target.pk,
-        )
-        if not created:
-            return
-        notifications = NotificationService.notify(
-            user, rule.notification_type, rule.channels,
-            context=context, event=rule.event, related_object=target,
-        )
-        if notifications:
-            ScheduledReminder.objects.filter(
-                reminder_rule=rule, user=user, content_type=content_type, object_id=target.pk,
-            ).update(notification=notifications[0])
-
-
-def _resolve_targets(rule, now):
-    """Yields (target_obj, user, context) whose reminder window is open now."""
     window = timedelta(minutes=REMINDER_CHECK_WINDOW_MINUTES)
 
-    if rule.applies_to == ReminderTarget.EVENT:
-        event = rule.event
-        if not event.scheduled_start:
-            return
-        fire_at = event.scheduled_start - timedelta(minutes=rule.offset_minutes_before)
-        if not (fire_at <= now < fire_at + window):
-            return
-        registrations = Registration.objects.filter(
-            event=event, status=RegistrationStatus.ACCEPTED
-        ).select_related("user")
-        for reg in registrations:
-            yield event, reg.user, {
-                "event_title": event.title,
-                "start_time": event.scheduled_start.isoformat(),
-            }
+    events = Event.objects.filter(scheduled_start__gte=now)
 
-    elif rule.applies_to == ReminderTarget.SCHEDULE_ITEM:
-        items = ScheduleItem.objects.filter(
-            day__event=rule.event, item_type=ScheduleItemType.SESSION
-        ).select_related("day")
-        for item in items:
-            start_dt = datetime.combine(item.day.date, item.start_time)
-            if timezone.is_naive(start_dt):
-                start_dt = timezone.make_aware(start_dt)
-            fire_at = start_dt - timedelta(minutes=rule.offset_minutes_before)
+    for event in events:
+        for offset_minutes, label in REMINDER_OFFSETS_MINUTES:
+            fire_at = event.scheduled_start - timedelta(minutes=offset_minutes)
             if not (fire_at <= now < fire_at + window):
                 continue
-            registrations = RegistrationSession.objects.filter(
-                session=item, status=RegistrationStatus.ACCEPTED
-            ).select_related("registration__user")
-            for rs in registrations:
-                yield item, rs.registration.user, {
-                    "session_title": item.title,
-                    "start_time": start_dt.isoformat(),
-                    "room": item.room,
-                }
+
+            title = f"Event Reminder ({label})"
+            registrations = Registration.objects.filter(
+                event=event, status=RegistrationStatus.ACCEPTED
+            ).select_related("user")
+
+            for reg in registrations:
+                already_sent = Notification.objects.filter(
+                    user=reg.user,
+                    event=event,
+                    notification_type=NotificationType.EVENT_REMINDER,
+                    title=title,
+                ).exists()
+                if already_sent:
+                    continue
+
+                body = (
+                    f'Reminder: "{event.title}" starts '
+                    f"{label.replace(' before', '')} — "
+                    f"{event.scheduled_start.strftime('%b %d, %Y %I:%M %p')}."
+                )
+                notify(
+                    reg.user,
+                    NotificationType.EVENT_REMINDER,
+                    REMINDER_CHANNELS,
+                    title=title,
+                    body=body,
+                    event=event,
+                )
