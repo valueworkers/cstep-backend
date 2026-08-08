@@ -17,8 +17,8 @@ app.conf.beat_schedule = {
     },
 
     "generate-event-reminders": {
-        "task": "notifications.tasks.generate_event_reminders",
-        "schedule": 300.0,  # every 5 minutes
+        "task": "notification.tasks.generate_event_reminders",
+        "schedule": 30.0,  # every 5 minutes
     }
 }
 
