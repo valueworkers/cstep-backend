@@ -262,8 +262,8 @@ class BroadcastSession(models.Model):
     name = models.CharField(max_length=100, default="Camera 1")
     is_primary = models.BooleanField(default=False)
     stream_key = models.CharField(max_length=64, unique=True, db_index=True, editable=False)
-    ingest_url = models.URLField(editable=False)    # WHIP — broadcaster publishes here
-    playback_url = models.URLField(editable=False)  # WHEP — viewers subscribe here
+    ingest_url = models.URLField(editable=True)    # WHIP — broadcaster publishes here
+    playback_url = models.URLField(editable=True)  # WHEP — viewers subscribe here
 
     is_active = models.BooleanField(default=False)
     started_at = models.DateTimeField(null=True, blank=True)
