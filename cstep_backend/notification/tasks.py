@@ -84,26 +84,39 @@ def generate_event_reminders():
                 event=event, status=RegistrationStatus.ACCEPTED
             ).select_related("user")
 
-            for reg in registrations:
-                already_sent = Notification.objects.filter(
-                    user=reg.user,
+            # One query for the whole event/offset instead of one exists()
+            # check per registrant (same N+1 pattern already fixed elsewhere
+            # in the registrations app via bulk_create/bulk_update).
+            already_notified_user_ids = set(
+                Notification.objects.filter(
                     event=event,
                     notification_type=NotificationType.EVENT_REMINDER,
                     title=title,
-                ).exists()
-                if already_sent:
+                ).values_list("user_id", flat=True)
+            )
+
+            body = (
+                f'Reminder: "{event.title}" starts '
+                f"{label.replace(' before', '')} — "
+                f"{event.scheduled_start.strftime('%b %d, %Y %I:%M %p')}."
+            )
+
+            for reg in registrations:
+                if reg.user_id in already_notified_user_ids:
                     continue
 
-                body = (
-                    f'Reminder: "{event.title}" starts '
-                    f"{label.replace(' before', '')} — "
-                    f"{event.scheduled_start.strftime('%b %d, %Y %I:%M %p')}."
-                )
-                notify(
-                    reg.user,
+                # Fan out to the queue instead of calling notify() inline here:
+                # notify() hits SMTP/SMS synchronously, and this task is
+                # already running once per beat tick for potentially every
+                # registrant of every upcoming event — inlining it would
+                # block the beat task's worker slot for however long
+                # send_mail/Fast2SMS takes, per registrant.
+                send_notification_async.delay(
+                    reg.user_id,
                     NotificationType.EVENT_REMINDER,
                     REMINDER_CHANNELS,
                     title=title,
                     body=body,
-                    event=event,
+                    event_id=event.id,
                 )
+

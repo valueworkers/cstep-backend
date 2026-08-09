@@ -1,7 +1,9 @@
 from django.db.models.signals import post_save, pre_save
+from django.db import transaction
 from django.dispatch import receiver
 
 from registrations.models import Registration
+from .tasks import send_notification_async
 
 from .constants import NotificationChannel, NotificationType
 from .services import notify
@@ -17,23 +19,24 @@ def _stash_old_status(sender, instance, **kwargs):
         if instance.pk else None
     )
 
-
 @receiver(post_save, sender=Registration)
 def _notify_registration(sender, instance, created, **kwargs):
     if created:
-        notify(
-            instance.user, NotificationType.REGISTRATION_CONFIRMED, [IN_APP, EMAIL],
+        transaction.on_commit(lambda: send_notification_async.delay(
+            instance.user_id, NotificationType.REGISTRATION_CONFIRMED,
+            [IN_APP, EMAIL],
             title="Registration confirmed",
             body=f"You're registered for {instance.event.title}.",
-            event=instance.event,
-        )
+            event_id=instance.event_id,
+        ))
         return
 
     old_status = getattr(instance, "_old_status", None)
     if old_status is not None and old_status != instance.status:
-        notify(
-            instance.user, NotificationType.REGISTRATION_STATUS_UPDATE, [IN_APP, EMAIL],
+        transaction.on_commit(lambda: send_notification_async.delay(
+            instance.user_id, NotificationType.REGISTRATION_STATUS_UPDATE,
+            [IN_APP, EMAIL],
             title="Registration status updated",
             body=f"Your registration for {instance.event.title} is now {instance.get_status_display()}.",
-            event=instance.event,
-        )
+            event_id=instance.event_id,
+        ))

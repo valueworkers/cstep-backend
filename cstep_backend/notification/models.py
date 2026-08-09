@@ -24,6 +24,7 @@ class Notification(models.Model):
         ordering = ["-created_at"]
         indexes = [
             models.Index(fields=["user", "channel", "is_read"]),
+            models.Index(fields=["event", "notification_type", "title"]),
         ]
 
     def mark_read(self):
