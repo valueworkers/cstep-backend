@@ -29,9 +29,11 @@ def notify(user, notification_type, channels, title="", body="", event=None):
 def _deliver(notification):
     try:
         if notification.channel == NotificationChannel.EMAIL:
-            _send_email(notification)
+            # _send_email(notification)
+            pass
         elif notification.channel == NotificationChannel.SMS:
-            _send_sms(notification)
+            # _send_sms(notification)
+            pass
         elif notification.channel == NotificationChannel.IN_APP:
             _push_in_app(notification)
     except Exception:
