@@ -140,22 +140,31 @@ class EventViewSet(viewsets.ModelViewSet):
         queryset = Event.objects.filter(scheduled_start__gte=timezone.now()).annotate(
             total_registered_users=Count("registrations__user", distinct=True),
             participants_attended=Count(
-                "registrations", filter=Q(registrations__user__viewer_sessions__event=F("pk")), distinct=True,
+                "registrations",
+                filter=Q(registrations__user__viewer_sessions__event=F("pk")),
+                distinct=True,
             ),
             participants_accepted=Count(
-                "registrations", filter=Q(registrations__status=RegistrationStatus.ACCEPTED)
+                "registrations",
+                filter=Q(registrations__status=RegistrationStatus.ACCEPTED),
+                distinct=True,
             ),
             participants_rejected=Count(
-                "registrations", filter=Q(registrations__status=RegistrationStatus.REJECTED)
+                "registrations",
+                filter=Q(registrations__status=RegistrationStatus.REJECTED),
+                distinct=True,
             ),
             participants_pending=Count(
-                "registrations", filter=Q(registrations__status=RegistrationStatus.PENDING)
+                "registrations",
+                filter=Q(registrations__status=RegistrationStatus.PENDING),
+                distinct=True,
             ),
             participants_hold=Count(
-                "registrations", filter=Q(registrations__status=RegistrationStatus.HOLD)
+                "registrations",
+                filter=Q(registrations__status=RegistrationStatus.HOLD),
+                distinct=True,
             ),
         ).order_by("scheduled_start")
-
         if request.user.is_authenticated:
             user_registered = Registration.objects.filter(event=OuterRef("pk"), user=request.user)
             queryset = queryset.annotate(is_registered=Exists(user_registered))
