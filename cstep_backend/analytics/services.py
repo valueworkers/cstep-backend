@@ -773,6 +773,8 @@ class LiveAnalyticsService:
             payload["participation_rate"] = rate_table
         if "participation_duration" in wanted:
             payload["participation_duration"] = self.participation_duration()
+        if "participation_time" in wanted:
+            payload["participation_time"] = self.participation_time_table()
  
         return payload
  

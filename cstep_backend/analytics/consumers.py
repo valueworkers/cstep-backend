@@ -95,7 +95,6 @@ class LiveAnalyticsConsumer(AsyncAPIConsumer):
         await self.channel_layer.group_discard(self.group_name, self.channel_name)
         await database_sync_to_async(unregister_connection)(self.event_id)
         await database_sync_to_async(remove_visuals)(self.event_id, self.requested_visuals)
-
     async def _subscribe(self, visual):
         if visual not in self.requested_visuals:
             self.requested_visuals.add(visual)
@@ -142,6 +141,7 @@ class LiveAnalyticsConsumer(AsyncAPIConsumer):
     @action()
     async def participation_time(self, **kwargs):
         return await self._subscribe("participation_time")
+    
     @action()
     async def participation_duration(self, **kwargs):
         return await self._subscribe("participation_duration")
