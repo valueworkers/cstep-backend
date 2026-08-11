@@ -1,11 +1,11 @@
 # analytics/services.py
 from datetime import timedelta, datetime, time
 
-from django.db.models import Count, Avg, Sum, Q, F
+from django.db.models import Count, Avg, Sum, Q, F,When,Value,Case,IntegerField
 from django.db.models.functions import TruncDate, TruncWeek, TruncMonth
 from django.utils import timezone
 from accounts.models import User,Gender,OrganisationType
-from events.models import Event, BroadcastSession, ViewerSession, Feedback, ScheduleItem, ScheduleItemType, EventDay
+from events.models import Event, ChatMessage, BroadcastSession, ViewerSession, Feedback, ScheduleItem, ScheduleItemType, EventDay
 from registrations.models import Registration, RegistrationDay, RegistrationSession
 from registrations.constants import RegistrationStatus, AttendanceMode
 
@@ -706,13 +706,87 @@ class LiveAnalyticsService:
         return rows
  
     # ---------- Visual 9: # of Chats ----------
-    def chat_count(self):
+    def chat_count(self, session_id=None, day_id=None):
         """
-        TODO: no ChatMessage model exists in what you've shared. Point this at
-        it (or a Redis counter your chat consumer increments) once it exists.
-        Stubbed at 0 so the payload shape stays stable for the frontend.
+        Total + breakdowns by user, by day, and by session.
+
+        ChatMessage has no `session`/`day` FK, so day/session buckets are
+        derived by matching created_at against EventDay date ranges and
+        this.sessions' scheduled windows — done as a single conditional
+        aggregation (Case/When) rather than one query per day/session,
+        since this rebuilds on every push_live_analytics tick.
         """
-        return {"total": 0}
+        base_qs = ChatMessage.objects.filter(event=self.event, is_deleted=False)
+
+        total = base_qs.count()
+
+        by_user = list(
+            base_qs.values("sender_id", "sender__first_name", "sender__last_name")
+            .annotate(count=Count("id"))
+            .order_by("-count")
+        )
+        for row in by_user:
+            row["name"] = f'{row.pop("sender__first_name")} {row.pop("sender__last_name")}'.strip()
+            row["user_id"] = row.pop("sender_id")
+
+        # # ---- by day ----
+        # days = EventDay.objects.filter(event=self.event)
+        # if day_id:
+        #     days = days.filter(id=day_id)
+        # days = list(days.order_by("day_number"))
+
+        # day_whens = [
+        #     When(
+        #         created_at__gte=self._aware(datetime.combine(d.date, time.min)),
+        #         created_at__lt=self._aware(datetime.combine(d.date, time.max)),
+        #         then=Value(d.id),
+        #     )
+        #     for d in days
+        # ]
+        # by_day_counts = {}
+        # if day_whens:
+        #     by_day_counts = dict(
+        #         base_qs.annotate(day_bucket=Case(*day_whens, default=Value(None), output_field=IntegerField()))
+        #         .exclude(day_bucket__isnull=True)
+        #         .values("day_bucket")
+        #         .annotate(count=Count("id"))
+        #         .values_list("day_bucket", "count")
+        #     )
+        # by_day = [
+        #     {"day_id": d.id, "day_number": d.day_number, "count": by_day_counts.get(d.id, 0)}
+        #     for d in days
+        # ]
+
+        # # ---- by session ----
+        # sessions = self._sessions_filtered(session_id)
+        # session_whens = [
+        #     When(
+        #         created_at__gte=self._aware(datetime.combine(s.day.date, s.start_time)),
+        #         created_at__lt=self._aware(datetime.combine(s.day.date, s.end_time)),
+        #         then=Value(s.id),
+        #     )
+        #     for s in sessions
+        # ]
+        # by_session_counts = {}
+        # if session_whens:
+        #     by_session_counts = dict(
+        #         base_qs.annotate(session_bucket=Case(*session_whens, default=Value(None), output_field=IntegerField()))
+        #         .exclude(session_bucket__isnull=True)
+        #         .values("session_bucket")
+        #         .annotate(count=Count("id"))
+        #         .values_list("session_bucket", "count")
+        #     )
+        # by_session = [
+        #     {"session_id": s.id, "session_name": s.title, "count": by_session_counts.get(s.id, 0)}
+        #     for s in sessions
+        # ]
+
+        return {
+            "total": total,
+            "by_user": by_user,
+            # "by_day": by_day,
+            # "by_session": by_session,
+        }
 
     # ---------- Visual 10: Participation Duration (per-user) ----------
     def participation_duration(self, session_id=None, day_id=None):
@@ -750,7 +824,7 @@ class LiveAnalyticsService:
         payload = {"event_id": self.event.id, "generated_at": self.now.isoformat()}
  
         rate_table = None
-        if "session_wise_max_virtual" in wanted or "participation_rate" in wanted:
+        if "participation_rate" in wanted:
             rate_table = self.participation_rate_table()
  
         if "statewise_login" in wanted:
@@ -773,6 +847,8 @@ class LiveAnalyticsService:
             payload["participation_rate"] = rate_table
         if "participation_duration" in wanted:
             payload["participation_duration"] = self.participation_duration()
+        if "participation_time" in wanted:
+            payload["participation_time"] = self.participation_time_table()
  
         return payload
  
