@@ -750,7 +750,7 @@ class LiveAnalyticsService:
         payload = {"event_id": self.event.id, "generated_at": self.now.isoformat()}
  
         rate_table = None
-        if "session_wise_max_virtual" in wanted or "participation_rate" in wanted:
+        if "participation_rate" in wanted:
             rate_table = self.participation_rate_table()
  
         if "statewise_login" in wanted:
