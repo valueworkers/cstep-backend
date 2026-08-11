@@ -8,6 +8,7 @@ from .models import (
     ViewerSession,
     StreamRecording,
     Feedback,
+    ChatMessage
 )
 
 
@@ -120,3 +121,56 @@ class FeedbackAdmin(admin.ModelAdmin):
     @admin.display(description="Target")
     def target_display(self, obj):
         return "Overall" if obj.is_overall_rating else str(obj.schedule_item)
+
+from django.contrib import admin
+from .models import ChatMessage
+
+
+@admin.register(ChatMessage)
+class ChatMessageAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "event",
+        "sender",
+        "message_preview",
+        "status",
+        "created_at",
+        "edited_at",
+    )
+
+    list_filter = (
+        "is_deleted",
+        "event",
+        "created_at",
+    )
+
+    search_fields = (
+        "message",
+        "sender__email",
+        "sender__username",
+        "event__title",
+    )
+
+    autocomplete_fields = (
+        "event",
+        "sender",
+    )
+
+    readonly_fields = (
+        "created_at",
+        "edited_at",
+    )
+
+    @admin.display(description="Message")
+    def message_preview(self, obj):
+        if len(obj.message) > 60:
+            return f"{obj.message[:60]}..."
+        return obj.message
+
+    @admin.display(description="Status")
+    def status(self, obj):
+        if obj.is_deleted:
+            return "Deleted"
+        elif obj.edited_at:
+            return "Edited"
+        return "Active"
