@@ -468,6 +468,7 @@ class LiveAnalyticsService:
         "chats",
         "participation_rate",
         "participation_time",
+        "participation_duration",
     })
 
     def __init__(self, event):
@@ -713,6 +714,33 @@ class LiveAnalyticsService:
         """
         return {"total": 0}
 
+    # ---------- Visual 10: Participation Duration (per-user) ----------
+    def participation_duration(self, session_id=None, day_id=None):
+        """
+        Per-user watch record: who joined, when, for how long. Unlike
+        participation_time_table (bucketed counts for a chart), this is a
+        flat row-per-ViewerSession listing — meant for a table/export view.
+        select_related('user') to avoid N+1 on full_name/email per row.
+        """
+        qs = ViewerSession.objects.filter(event=self.event).select_related("user")
+        if session_id:
+            qs = qs.filter(session_id=session_id)
+        if day_id:
+            qs = qs.filter(day_id=day_id)
+
+        rows = []
+        for vs in qs:
+            user = vs.user
+            rows.append({
+                "user_id": user.id,
+                "full_name": user.full_name(),
+                "email": user.email,
+                "joined_at": vs.joined_at.isoformat(),
+                "left_at": vs.left_at.isoformat() if vs.left_at else None,
+                "watch_duration_seconds": self._duration_seconds(vs),
+            })
+        return rows
+
     # ---------- Payload assembly ----------
     def build_payload(self, visuals=None):
         """visuals: None -> build everything. Otherwise an iterable of visual
@@ -743,8 +771,8 @@ class LiveAnalyticsService:
             payload["chats"] = self.chat_count()
         if "participation_rate" in wanted:
             payload["participation_rate"] = rate_table
-        if "participation_time" in wanted:
-            payload["participation_time"] = self.participation_time_table()
+        if "participation_duration" in wanted:
+            payload["participation_duration"] = self.participation_duration()
  
         return payload
  

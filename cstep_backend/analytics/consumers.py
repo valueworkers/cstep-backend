@@ -142,6 +142,9 @@ class LiveAnalyticsConsumer(AsyncAPIConsumer):
     @action()
     async def participation_time(self, **kwargs):
         return await self._subscribe("participation_time")
+    @action()
+    async def participation_duration(self, **kwargs):
+        return await self._subscribe("participation_duration")
 
     # ---- plain Channels group-send handler, not a DCRF @action ----
     async def analytics_update(self, event):
