@@ -253,13 +253,6 @@ class RegistrationSerializer(serializers.ModelSerializer):
             "updated_at",
         ]
 
-        # validators = [
-        #     UniqueTogetherValidator(
-        #         queryset=Registration.objects.all(),
-        #         fields=["user", "event"],
-        #         message="You have already registered for this event."
-        #     )
-        # ]
 
     def validate(self, attrs):
         event = attrs["event"]
@@ -334,6 +327,7 @@ class RegistrationSerializer(serializers.ModelSerializer):
         return registration
 
     def update(self, instance, validated_data):
+        validated_data.pop("user", None)
         session_data = validated_data.pop("sessions", None)
 
         for attr, value in validated_data.items():
