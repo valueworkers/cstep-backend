@@ -253,13 +253,13 @@ class RegistrationSerializer(serializers.ModelSerializer):
             "updated_at",
         ]
 
-        validators = [
-            UniqueTogetherValidator(
-                queryset=Registration.objects.all(),
-                fields=["user", "event"],
-                message="You have already registered for this event."
-            )
-        ]
+        # validators = [
+        #     UniqueTogetherValidator(
+        #         queryset=Registration.objects.all(),
+        #         fields=["user", "event"],
+        #         message="You have already registered for this event."
+        #     )
+        # ]
 
     def validate(self, attrs):
         event = attrs["event"]
