@@ -137,7 +137,7 @@ class RegistrationDaySerializer(serializers.ModelSerializer):
 
     class Meta:
         model = RegistrationDay
-        fields = ["id", "registration", "day", "date", "day_number", "attendance_mode", "created_at","sessions"]
+        fields = ["id", "registration", "day", "date", "day_number", "attendance_mode", "is_attended", "created_at","sessions"]
         read_only_fields = ["id", "registration", "date", "day_number", "created_at"]
     
     def get_sessions(self, obj):
@@ -163,10 +163,13 @@ class RegistrationListSerializer(serializers.ModelSerializer):
     def get_registration_dates(self, obj):
         return list(
             obj.days.order_by("day__date").values(
+                "id",
+                "is_attended",
                 date=F("day__date"),
                 mode=F("attendance_mode"),
+                
             )
-        )
+        )     
     
 class RegistrationSessionInputSerializer(serializers.Serializer):
     day = serializers.PrimaryKeyRelatedField(
