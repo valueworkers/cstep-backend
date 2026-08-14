@@ -520,7 +520,7 @@ class FeedbackSerializer(serializers.ModelSerializer):
         event = attrs.get("event") or getattr(self.instance, "event", None)
         event_date = attrs.get("event_date", getattr(self.instance, "event_date", None))
         schedule_item = attrs.get("schedule_item", getattr(self.instance, "schedule_item", None))
-        
+
         is_overall_rating = attrs.get(
             "is_overall_rating", getattr(self.instance, "is_overall_rating", False)
         )
@@ -572,7 +572,7 @@ class FeedbackSerializer(serializers.ModelSerializer):
                     "You can only rate sessions you attended."
                 )
         else:
-            if not self.user_attended_event(user, event_date):
+            if not self.user_attended_event(user, event, event_date):
                 raise serializers.ValidationError(
                     "You can only rate events you attended."
                 )
@@ -586,8 +586,24 @@ class FeedbackSerializer(serializers.ModelSerializer):
             status=RegistrationStatus.ACCEPTED,
         ).exists()
 
+    def user_attended_event(self, user, event, event_date=None):
+        qs = RegistrationDay.objects.filter(
+            registration__user=user,
+            registration__event=event,
+            is_attended=True,
+        )
+        if event_date:
+            qs = qs.filter(day=event_date)
+        return qs.exists()
+
+    def user_can_rate_schedule_item(self, user, schedule_item):
+        return RegistrationSession.objects.filter(
+            registration__user=user,
+            session=schedule_item,
+            status=RegistrationStatus.ACCEPTED,
+        ).exists()
+
     def user_attended_event(self, user, event_date):
-      
         qs = RegistrationDay.objects.filter(
             registration__user=user,
             day=event_date,
