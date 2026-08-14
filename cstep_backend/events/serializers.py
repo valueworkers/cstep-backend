@@ -1,7 +1,7 @@
 from rest_framework import serializers
 from accounts.models import UserRole
 from .constants import ScheduleItemType,EventScheduleType,EventStatus
-from registrations.models import RegistrationSession, RegistrationStatus
+from registrations.models import RegistrationSession,RegistrationDay, RegistrationStatus
 from .models import (
     Event,
     BroadcastSession,
@@ -520,6 +520,7 @@ class FeedbackSerializer(serializers.ModelSerializer):
         event = attrs.get("event") or getattr(self.instance, "event", None)
         event_date = attrs.get("event_date", getattr(self.instance, "event_date", None))
         schedule_item = attrs.get("schedule_item", getattr(self.instance, "schedule_item", None))
+        
         is_overall_rating = attrs.get(
             "is_overall_rating", getattr(self.instance, "is_overall_rating", False)
         )
@@ -571,7 +572,7 @@ class FeedbackSerializer(serializers.ModelSerializer):
                     "You can only rate sessions you attended."
                 )
         else:
-            if not self.user_attended_event(user, event, event_date):
+            if not self.user_attended_event(user, event_date):
                 raise serializers.ValidationError(
                     "You can only rate events you attended."
                 )
@@ -585,18 +586,15 @@ class FeedbackSerializer(serializers.ModelSerializer):
             status=RegistrationStatus.ACCEPTED,
         ).exists()
 
-    def user_attended_event(self, user, event, event_date=None):
-        qs = RegistrationSession.objects.filter(
+    def user_attended_event(self, user, event_date):
+      
+        qs = RegistrationDay.objects.filter(
             registration__user=user,
-            session__event=event,
-            status=RegistrationStatus.ACCEPTED,
+            day=event_date,
+            is_attended=True,
         )
-        if event_date:
-            qs = qs.filter(session__event_date=event_date)
         return qs.exists()
 
-
- 
 class ChatMessageSerializer(serializers.ModelSerializer):
     sender_id = serializers.IntegerField(source="sender.id", read_only=True)
     sender_name = serializers.SerializerMethodField()
