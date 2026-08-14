@@ -277,9 +277,7 @@ class RegistrationDay(models.Model):
     registration = models.ForeignKey(Registration, on_delete=models.CASCADE, related_name="days")
     day = models.ForeignKey("events.EventDay", on_delete=models.CASCADE, related_name="registration_days")
     attendance_mode = models.CharField(max_length=20, choices=AttendanceMode.choices,default=AttendanceMode.VIRTUAL)
-    # status = models.CharField(
-    #     max_length=20, choices=RegistrationStatus.choices, default=RegistrationStatus.PENDING
-    # )
+    is_attended = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
