@@ -183,26 +183,32 @@ EMAIL_HOST_PASSWORD = os.getenv("SENDGRID_API_KEY")  # your actual key goes here
 DEFAULT_FROM_EMAIL = os.getenv("SENDGRID_FROM_EMAIL")
 
 # ─── Media Server ────────────────────────────────────────────────────────────────────
-MEDIA_SERVER_WEBHOOK_SECRET = os.getenv(
-    "MEDIA_SERVER_WEBHOOK_SECRET",
-    "ze0!ev-x0#84$*m!78#&)fi01k)v!&o*y^&2mo^y-t^&$bw!ht"
+OME_HOST = os.getenv("OME_HOST", "168.144.95.80")
+OME_VHOST_NAME = os.getenv("OME_VHOST_NAME", "default")
+OME_APP_NAME = os.getenv("OME_APP_NAME", "app")
+
+OME_API_ENABLE_TLS = os.getenv("OME_API_ENABLE_TLS", "False") == "True"
+OME_API_PORT = os.getenv("OME_API_PORT", "8081")
+OME_API_ACCESS_TOKEN = os.getenv("OME_API_ACCESS_TOKEN")
+
+OME_RTMP_PROVIDER_PORT = os.getenv("OME_RTMP_PROVIDER_PORT", "1935")
+OME_SRT_PROVIDER_PORT = os.getenv("OME_SRT_PROVIDER_PORT", "9999")
+
+OME_WEBRTC_PROVIDER_ENABLE_TLS = (
+    os.getenv("OME_WEBRTC_PROVIDER_ENABLE_TLS", "False") == "True"
 )
-MEDIA_SERVER_RTMP_BASE_URL = os.getenv(
-    "MEDIA_SERVER_RTMP_BASE_URL",
-    "rtmp://localhost:1935/live",
-).rstrip("/")
-MEDIA_SERVER_RTSP_BASE_URL = os.getenv(
-    "MEDIA_SERVER_RTSP_BASE_URL",
-    "rtsp://localhost:8554/live",
-).rstrip("/")
-MEDIA_SERVER_HLS_BASE_URL = os.getenv(
-    "MEDIA_SERVER_HLS_BASE_URL",
-    "http://localhost:8888/live",
-).rstrip("/")
-MEDIA_SERVER_WEBRTC_BASE_URL = os.getenv(
-    "MEDIA_SERVER_WEBRTC_BASE_URL",
-    "http://localhost:8889/live",
-).rstrip("/")
+OME_WEBRTC_PROVIDER_PORT = os.getenv("OME_WEBRTC_PROVIDER_PORT", "3333")
+
+OME_WEBRTC_PUBLISHER_ENABLE_TLS = (
+    os.getenv("OME_WEBRTC_PUBLISHER_ENABLE_TLS", "False") == "True"
+)
+OME_WEBRTC_PUBLISHER_PORT = os.getenv("OME_WEBRTC_PUBLISHER_PORT", "3333")
+
+OME_LLHLS_PUBLISHER_ENABLE_TLS = (
+    os.getenv("OME_LLHLS_PUBLISHER_ENABLE_TLS", "False") == "True"
+)
+OME_LLHLS_PUBLISHER_PORT = os.getenv("OME_LLHLS_PUBLISHER_PORT", "3333")
+OME_ADMISSION_WEBHOOK_SECRET = os.getenv("OME_ADMISSION_WEBHOOK_SECRET", "")
 
 # ─── CORS ─────────────────────────────────────────────────────────────────────
 CORS_ALLOW_ALL_ORIGINS = True  # Tighten in production

@@ -16,6 +16,7 @@ from .models import (
 from .constants import EventScheduleType
 from .media import build_ingest_urls, build_playback_urls
 from django.core.exceptions import ValidationError as DjangoValidationError
+from urllib.parse import urlparse
 
 # Schedule (EventDay / ScheduleItem)
 
@@ -448,26 +449,33 @@ class HeartbeatSerializer(serializers.Serializer):
         return attrs
 
 # Webhook (inbound from media server)
-class StreamWebhookSerializer(serializers.Serializer):
-    ACTIONS = ["stream.started", "stream.ended", "stream.error"]
+class AdmissionWebhookSerializer(serializers.Serializer):
+    """Parses OvenMediaEngine's AdmissionWebhooks payload:
+    {"client": {...}, "request": {"direction": "incoming|outgoing",
+    "protocol": "webrtc|rtmp|srt|llhls", "status": "opening|closing",
+    "url": "scheme://host:port/app/stream?query", "time": "..."}}"""
 
-    action = serializers.ChoiceField(choices=ACTIONS)
-    stream_key = serializers.CharField()
-    timestamp = serializers.DateTimeField(required=False)
+    client = serializers.DictField(required=False)
+    request = serializers.DictField()
 
-    def validate_stream_key(self, value):
-        try:
-            self._broadcast_session = BroadcastSession.objects.select_related("event").get(
-                stream_key=value
-            )
-        except BroadcastSession.DoesNotExist:
-            raise serializers.ValidationError("Invalid stream key.")
-        return value
+    def validate(self, attrs):
+        req = attrs["request"]
+        if req.get("direction") not in ("incoming", "outgoing"):
+            raise serializers.ValidationError({"request.direction": "must be incoming or outgoing"})
+        if req.get("status") not in ("opening", "closing"):
+            raise serializers.ValidationError({"request.status": "must be opening or closing"})
+        attrs["direction"] = req["direction"]
+        attrs["status"] = req["status"]
+        attrs["url"] = req.get("url", "")
+        return attrs
 
     @property
-    def broadcast_session(self):
-        return self._broadcast_session
-
+    def stream_key(self):
+        # url path is /{app_name}/{stream_key}[/...] — take the segment after app_name
+        path = urlparse(self.validated_data["url"]).path.strip("/")
+        parts = path.split("/")
+        return parts[1] if len(parts) > 1 else (parts[0] if parts else "")
+    
 # Analytics
 class EventAnalyticsSerializer(serializers.Serializer):
     event_id = serializers.IntegerField()

@@ -1,4 +1,6 @@
 # events/views.py
+import uuid
+
 from django.utils import timezone
 from django.shortcuts import get_object_or_404
 from django.db.models import Avg, Q, F, Exists, Max, OuterRef, Value, BooleanField, Count
@@ -12,6 +14,7 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 
 from accounts.models import UserRole
 from .constants import ScheduleItemType
+from . import ome_client
 
 from .utils import _get_peak_viewers, _send_ws_event
 from .models import Event, EventDay, EventStatus, BroadcastSession, ScheduleItem, Feedback, ViewerSession,ChatMessage
@@ -700,34 +703,39 @@ class BroadcastSessionViewSet(viewsets.ModelViewSet):
     def start_recording(self, request, pk=None):
         session = self.get_object()
         if session.is_recording:
-            return Response(
-                {"detail": "Recording already in progress."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            return Response({"detail": "Recording already in progress."}, status=status.HTTP_400_BAD_REQUEST)
 
-        recording = StreamRecording.objects.create(broadcast_session=session, started_by=request.user)
+        record_id = f"bs{session.id}-{uuid.uuid4().hex[:8]}"
+        try:
+            ome_client.start_recording(session.stream_key, record_id)
+        except requests.RequestException as exc:
+            logger.error("OME startRecord failed for session %s: %s", session.id, exc)
+            return Response({"detail": "Could not start recording on the media server."}, status=status.HTTP_502_BAD_GATEWAY)
+
+        recording = StreamRecording.objects.create(
+            broadcast_session=session, started_by=request.user, provider_record_id=record_id,
+        )
         session.is_recording = True
         session.save(update_fields=["is_recording"])
 
         _send_ws_event(session.event_id, {
-            "type": "recording.started",
-            "broadcast_session_id": session.id,
-            "recording_id": recording.id,
+            "type": "recording.started", "broadcast_session_id": session.id, "recording_id": recording.id,
         })
-
-        # TODO: trigger_mediamtx_recording(session.stream_key, enable=True)
-
         return Response(StreamRecordingSerializer(recording).data, status=status.HTTP_201_CREATED)
+
 
     @action(detail=True, methods=["post"], url_path="stop_recording")
     def stop_recording(self, request, pk=None):
         session = self.get_object()
         recording = session.recordings.filter(status=RecordingStatus.RECORDING).first()
         if not recording:
-            return Response(
-                {"detail": "No recording in progress."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            return Response({"detail": "No recording in progress."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            ome_client.stop_recording(recording.provider_record_id)
+        except requests.RequestException as exc:
+            logger.error("OME stopRecord failed for recording %s: %s", recording.id, exc)
+            return Response({"detail": "Could not stop recording on the media server."}, status=status.HTTP_502_BAD_GATEWAY)
 
         recording.ended_at = timezone.now()
         recording.status = RecordingStatus.PROCESSING
@@ -735,9 +743,6 @@ class BroadcastSessionViewSet(viewsets.ModelViewSet):
 
         session.is_recording = False
         session.save(update_fields=["is_recording"])
-
-        # TODO: stop MediaMTX recording, kick off process_recording.delay(recording.id)
-
         return Response(StreamRecordingSerializer(recording).data)
 
     @action(detail=True, methods=["get"], url_path="recordings")

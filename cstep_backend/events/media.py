@@ -1,59 +1,59 @@
-"""
-Pure helpers for building MediaMTX URLs.
-No model imports here, so models.py / serializers.py / utils.py can import this
-without creating a circular dependency.
-"""
-
+from urllib.parse import quote
 from django.conf import settings
 
 
-def _rtmp_base_url() -> str:
-    return settings.MEDIA_SERVER_RTMP_BASE_URL.rstrip("/")
-
-
-def _rtsp_base_url() -> str:
-    return settings.MEDIA_SERVER_RTSP_BASE_URL.rstrip("/")
-
-
-def _hls_base_url() -> str:
-    return settings.MEDIA_SERVER_HLS_BASE_URL.rstrip("/")
-
-
-def _webrtc_base_url() -> str:
-    return settings.MEDIA_SERVER_WEBRTC_BASE_URL.rstrip("/")
+def _scheme(enable_tls) -> str:
+    enabled = str(enable_tls).lower() == "true" if isinstance(enable_tls, str) else bool(enable_tls)
+    return "https" if enabled else "http"
 
 
 def build_whip_ingest_url(stream_key: str) -> str:
-    return f"{_webrtc_base_url()}/{stream_key}/whip"
+    """Broadcaster's browser POSTs its WHIP offer here directly — Django
+    never proxies media, it only hands this URL back to the client."""
+    scheme = _scheme(settings.OME_WEBRTC_PROVIDER_ENABLE_TLS)
+    return (
+        f"{scheme}://{settings.OME_HOST}:{settings.OME_WEBRTC_PROVIDER_PORT}"
+        f"/{settings.OME_APP_NAME}/{stream_key}?direction=whip"
+    )
 
 
 def build_whep_playback_url(stream_key: str) -> str:
-    return f"{_webrtc_base_url()}/{stream_key}/whep"
+    scheme = _scheme(settings.OME_WEBRTC_PUBLISHER_ENABLE_TLS)
+    return (
+        f"{scheme}://{settings.OME_HOST}:{settings.OME_WEBRTC_PUBLISHER_PORT}"
+        f"/{settings.OME_APP_NAME}/{stream_key}?direction=whep"
+    )
+
+
+def build_llhls_playback_url(stream_key: str) -> str:
+    """Fallback for clients that can't do WebRTC (e.g. some in-app webviews)."""
+    scheme = _scheme(settings.OME_LLHLS_PUBLISHER_ENABLE_TLS)
+    return (
+        f"{scheme}://{settings.OME_HOST}:{settings.OME_LLHLS_PUBLISHER_PORT}"
+        f"/{settings.OME_APP_NAME}/{stream_key}/llhls.m3u8"
+    )
 
 
 def build_rtmp_ingest_url(stream_key: str) -> str:
-    return f"{_rtmp_base_url()}/{stream_key}"
+    """Kept for OBS/hardware encoders that prefer RTMP over WHIP."""
+    return f"rtmp://{settings.OME_HOST}:{settings.OME_RTMP_PROVIDER_PORT}/{settings.OME_APP_NAME}/{stream_key}"
 
 
-def build_rtsp_url(stream_key: str) -> str:
-    return f"{_rtsp_base_url()}/{stream_key}"
-
-
-def build_hls_playback_url(stream_key: str) -> str:
-    return f"{_hls_base_url()}/{stream_key}/index.m3u8"
+def build_srt_ingest_url(stream_key: str) -> str:
+    target = f"srt://{settings.OME_HOST}:{settings.OME_SRT_PROVIDER_PORT}/{settings.OME_APP_NAME}/{stream_key}"
+    return f"srt://{settings.OME_HOST}:{settings.OME_SRT_PROVIDER_PORT}?streamid={quote(target, safe='')}"
 
 
 def build_ingest_urls(stream_key: str) -> dict:
     return {
+        "webrtc_whip": build_whip_ingest_url(stream_key),
         "rtmp": build_rtmp_ingest_url(stream_key),
-        "rtsp": build_rtsp_url(stream_key),
-        "webrtc": build_whip_ingest_url(stream_key),
+        "srt": build_srt_ingest_url(stream_key),
     }
 
 
 def build_playback_urls(stream_key: str) -> dict:
     return {
-        "rtsp": build_rtsp_url(stream_key),
-        "hls": build_hls_playback_url(stream_key),
-        "webrtc": build_whep_playback_url(stream_key),
+        "webrtc_whep": build_whep_playback_url(stream_key),
+        "llhls": build_llhls_playback_url(stream_key),
     }

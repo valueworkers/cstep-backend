@@ -1,111 +1,83 @@
+import base64
 import hashlib
 import hmac
 import logging
+from urllib.parse import urlparse
 
 from django.conf import settings
 from django.views.decorators.csrf import csrf_exempt
-
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
-from rest_framework import status
 
-from events.constants import RecordingStatus
-
-from .models import Event, EventStatus, BroadcastSession, ViewerSession
-from .serializers import StreamWebhookSerializer
-from .utils import _handle_stream_started, _handle_stream_ended, _handle_stream_error,_handle_recording_ready, _send_ws_event
+from .models import BroadcastSession
+from .serializers import AdmissionWebhookSerializer
+from .utils import _handle_stream_started, _handle_stream_ended
 
 logger = logging.getLogger(__name__)
 
 
-# ---------------------------------------------------------------------------
-# Signature verification
-# ---------------------------------------------------------------------------
-
-def _verify_webhook_signature(request) -> bool:
-    """
-    Verify HMAC-SHA256 signature sent by the media server.
-    Media server must set: X-Webhook-Signature: sha256=<hex_digest>
-
-    Set MEDIA_SERVER_WEBHOOK_SECRET in settings.py.
-    Skip verification in DEBUG mode (for local testing).
-    """
+def _verify_ome_signature(request) -> bool:
     if settings.DEBUG:
         return True
-
-    secret = getattr(settings, "MEDIA_SERVER_WEBHOOK_SECRET", None)
+    secret = settings.OME_ADMISSION_WEBHOOK_SECRET
     if not secret:
-        logger.warning("MEDIA_SERVER_WEBHOOK_SECRET not configured — rejecting webhook.")
+        logger.warning("OME_ADMISSION_WEBHOOK_SECRET not configured — rejecting webhook.")
         return False
 
-    signature_header = request.META.get("HTTP_X_WEBHOOK_SIGNATURE", "")
-    if not signature_header.startswith("sha256="):
+    signature = request.META.get("HTTP_X_OME_SIGNATURE", "")
+    if not signature:
         return False
 
-    expected = hmac.new(
-        key=secret.encode(),
-        msg=request.body,
-        digestmod=hashlib.sha256,
-    ).hexdigest()
-    received = signature_header[7:]
+    digest = hmac.new(secret.encode(), request.body, hashlib.sha1).digest()
+    expected = base64.urlsafe_b64encode(digest).decode()
+    return hmac.compare_digest(expected, signature)
 
-    return hmac.compare_digest(expected, received)
-
-
-# ---------------------------------------------------------------------------
-# Webhook endpoint
-# ---------------------------------------------------------------------------
 
 @csrf_exempt
 @api_view(["POST"])
 @permission_classes([AllowAny])
-def media_server_webhook(request):
+def ome_admission_webhook(request):
     """
-    POST /webhooks/stream/
+    POST /webhooks/ome/admission/
 
-    Called by your media server (nginx-rtmp, LiveKit, Agora, etc.)
-    when a stream starts, ends, or errors.
-
-    Expected payload:
-    {
-        "action": "stream.started" | "stream.ended" | "stream.error",
-        "stream_key": "<key>",
-        "playback_url": "https://cdn.example.com/live/stream.m3u8",  # on started
-        "timestamp": "2024-01-01T12:00:00Z"
-    }
+    Configure in OME's Server.xml:
+      <AdmissionWebhooks>
+        <ControlServerUrl>https://your-domain/webhooks/ome/admission/</ControlServerUrl>
+        <SecretKey>...</SecretKey>
+        <Timeout>3000</Timeout>
+        <Enables><Providers>webrtc,rtmp,srt</Providers><Publishers>webrtc,llhls</Publishers></Enables>
+      </AdmissionWebhooks>
     """
-    if not _verify_webhook_signature(request):
-        logger.warning("Webhook signature verification failed. IP: %s", request.META.get("REMOTE_ADDR"))
-        return Response({"detail": "Invalid signature."}, status=status.HTTP_401_UNAUTHORIZED)
+    if not _verify_ome_signature(request):
+        return Response({"allowed": False}, status=401)
 
-    serializer = StreamWebhookSerializer(data=request.data)
+    serializer = AdmissionWebhookSerializer(data=request.data)
     if not serializer.is_valid():
-        logger.error("Invalid webhook payload: %s", serializer.errors)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        logger.error("Invalid OME admission payload: %s", serializer.errors)
+        # Fail closed on malformed payloads rather than 400ing OME.
+        return Response({"allowed": False})
 
-    action = serializer.validated_data["action"]
-    bs: BroadcastSession = serializer.broadcast_session
-    event: Event = bs.event
+    direction = serializer.validated_data["direction"]   # incoming | outgoing
+    status_ = serializer.validated_data["status"]         # opening | closing
+    stream_key = serializer.stream_key                    # parsed from url path
 
-    logger.info("Webhook received: action=%s event_id=%s", action, event.id)
+    if direction == "outgoing":
+        # Viewer WHEP connect/disconnect. Keep this branch cheap — it fires
+        # on every viewer join/leave. Real viewer accounting already
+        # happens through the join/leave/heartbeat REST endpoints, so we
+        # just admit here rather than duplicating that bookkeeping.
+        return Response({"allowed": True})
 
-    if action == "stream.started":
-        _handle_stream_started(bs, event, serializer.validated_data)
+    # direction == "incoming": broadcaster publish/unpublish.
+    session = BroadcastSession.objects.select_related("event").filter(stream_key=stream_key).first()
+    if not session:
+        logger.warning("Admission webhook for unknown stream_key=%s", stream_key)
+        return Response({"allowed": False})
 
-    elif action == "stream.ended":
-        _handle_stream_ended(bs, event)
+    if status_ == "opening":
+        _handle_stream_started(session, session.event, {"timestamp": None})
+    elif status_ == "closing":
+        _handle_stream_ended(session, session.event)
 
-    elif action == "stream.error":
-        _handle_stream_error(bs, event)
-        
-    elif action == "recording.ready":
-        recording = bs.recordings.filter(status=RecordingStatus.PROCESSING).order_by("-started_at").first()
-        if not recording:
-            logger.warning("recording.ready webhook for session %s but no PROCESSING recording found.", bs.id)
-            return Response({"detail": "No matching recording."}, status=status.HTTP_400_BAD_REQUEST)
-        file_url = serializer.validated_data.get("file_url", "")
-        _handle_recording_ready(recording, file_url)
-
-    return Response({"status": "ok"})
-
+    return Response({"allowed": True})

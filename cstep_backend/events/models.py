@@ -364,6 +364,7 @@ class ViewerSession(models.Model):
         return f"{self.user} watching {self.event.title}"
 
 class StreamRecording(models.Model):
+    provider_record_id = models.CharField(max_length=64, blank=True)
     broadcast_session = models.ForeignKey(
         BroadcastSession, on_delete=models.CASCADE, related_name="recordings"
     )

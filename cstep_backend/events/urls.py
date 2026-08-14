@@ -2,7 +2,7 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from . import views
-from .webhooks import media_server_webhook
+from .webhooks import ome_admission_webhook
 
 app_name = "events"
 
@@ -18,5 +18,5 @@ router.register("chat-messages", views.ChatMessageViewSet, basename="chat-messag
 
 urlpatterns = [
     path("", include(router.urls)),
-    path("webhooks/stream/", media_server_webhook, name="stream-webhook"),
+    path("webhooks/ome/admission/", ome_admission_webhook, name="ome-admission-webhook"),
 ]
