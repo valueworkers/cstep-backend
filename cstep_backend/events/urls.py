@@ -12,6 +12,7 @@ router.register("event", views.EventBroadcastViewSet, basename="event-broadcast"
 router.register("event", views.EventViewerViewSet, basename="event-viewer")
 router.register("broadcast-sessions", views.BroadcastSessionViewSet, basename="broadcast-session")
 router.register("event-days", views.EventDayViewSet, basename="event-day")
+router.register(r"recordings", views.StreamRecordingViewSet, basename="recording")
 router.register("schedule-items", views.ScheduleItemViewSet, basename="schedule-item")
 router.register("feedback", views.FeedbackViewSet, basename="feedback")
 router.register("chat-messages", views.ChatMessageViewSet, basename="chat-message")

@@ -364,26 +364,29 @@ class ViewerSession(models.Model):
         return f"{self.user} watching {self.event.title}"
 
 class StreamRecording(models.Model):
-    broadcast_session = models.ForeignKey(
-        BroadcastSession, on_delete=models.CASCADE, related_name="recordings"
-    )
-    started_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, related_name="started_recordings"
+    session = models.OneToOneField(
+        ScheduleItem, on_delete=models.CASCADE, related_name="recording"
     )
     started_at = models.DateTimeField(auto_now_add=True)
     ended_at = models.DateTimeField(null=True, blank=True)
+ 
+    file = models.FileField(upload_to="recordings/%Y/%m/%d/", blank=True, null=True)
+    # Kept alongside `file` for recordings that live on external storage
+    # (CDN / signed S3 URL) instead of being uploaded through this API.
+    # Drop this if every recording will always go through `file`.
     file_url = models.URLField(blank=True)
+ 
     status = models.CharField(max_length=20, choices=RecordingStatus.choices, default=RecordingStatus.RECORDING)
-
+ 
     class Meta:
         ordering = ["-started_at"]
         indexes = [
-            models.Index(fields=["broadcast_session", "status"]),
+            models.Index(fields=["status"]),
         ]
-
+ 
     def __str__(self):
-        return f"Recording of {self.broadcast_session} [{self.status}]"
-
+        return f"Recording of {self.session} [{self.status}]"
+  
 class Feedback(models.Model):
     event = models.ForeignKey(Event, on_delete=models.CASCADE, related_name="ratings")
     event_date = models.ForeignKey(

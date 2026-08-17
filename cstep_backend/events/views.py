@@ -3,12 +3,13 @@ from django.utils import timezone
 from django.shortcuts import get_object_or_404
 from django.db.models import Avg, Q, F, Exists, Max, OuterRef, Value, BooleanField, Count
 from django.db import transaction
-
+import django_filters
 from rest_framework import viewsets, status, generics
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 
 from accounts.models import UserRole
 from .constants import ScheduleItemType
@@ -301,8 +302,7 @@ class EventBroadcastViewSet(viewsets.GenericViewSet):
         ViewerSession.objects.filter(event=event, left_at=None).update(left_at=now)
         # from analytics.broadcast import push_live_analytics
         # push_live_analytics(event.id)
-        RegistrationDay.objects.filter(event=event, user=request.user).update(is_attended=True)
-
+        RegistrationDay.objects.filter(day__event=event, registration__user=request.user).update(is_attended=True)
         _send_ws_event(event.id, {"type": "stream.ended"})
 
         return Response({"detail": "Stream ended."})
@@ -431,7 +431,7 @@ class EventViewerViewSet(viewsets.GenericViewSet):
         ViewerSession.objects.filter(event=event, user=request.user, left_at=None).update(
             left_at=timezone.now()
         )
-        RegistrationDay.objects.filter(event=event, user=request.user).update(is_attended=True)
+        RegistrationDay.objects.filter(day__event=event, registration__user=request.user).update(is_attended=True)
 
         viewer_session = ViewerSession.objects.create(
             user=request.user,
@@ -470,7 +470,7 @@ class EventViewerViewSet(viewsets.GenericViewSet):
 
         now = timezone.now()
         updated = ViewerSession.objects.filter(event=event, user=request.user, left_at=None).update(left_at=now)
-        RegistrationDay.objects.filter(event=event, user=request.user).update(is_attended=True)
+        RegistrationDay.objects.filter(day__event=event, registration__user=request.user).update(is_attended=True)
         if not updated:
             return Response({"detail": "No active viewer session found."}, status=status.HTTP_404_NOT_FOUND)
 
@@ -740,11 +740,36 @@ class BroadcastSessionViewSet(viewsets.ModelViewSet):
 
         return Response(StreamRecordingSerializer(recording).data)
 
-    @action(detail=True, methods=["get"], url_path="recordings")
-    def recordings(self, request, pk=None):
-        session = self.get_object()
-        qs = session.recordings.filter(status=RecordingStatus.READY)
-        return Response(StreamRecordingSerializer(qs, many=True).data)
+class StreamRecordingFilter(django_filters.FilterSet):
+    event_id = django_filters.NumberFilter(field_name="session__day__event_id")
+    day_id = django_filters.NumberFilter(field_name="session__day_id")
+    status = django_filters.CharFilter(field_name="status")
+    started_after = django_filters.DateTimeFilter(field_name="started_at", lookup_expr="gte")
+    started_before = django_filters.DateTimeFilter(field_name="started_at", lookup_expr="lte")
+
+    class Meta:
+        model = StreamRecording
+        fields = ["event_id", "day_id", "status", "session"]
+
+
+class StreamRecordingViewSet(viewsets.ModelViewSet):
+    queryset = StreamRecording.objects.select_related("session__day__event")
+    serializer_class = StreamRecordingSerializer
+    filterset_class = StreamRecordingFilter
+    search_fields = ["session__title", "status"]
+    ordering_fields = ["started_at", "ended_at", "status"]
+    ordering = ["-started_at"]
+
+    def get_permissions(self):
+        if self.action in ("list", "retrieve"):
+            return [IsAuthenticated]
+        return [IsModeratorOrAbove]
+        
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        context["event"] = getattr(self.request, "event", None)
+        context["day"] = getattr(self.request, "day", None)
+        return context
 
 class FeedbackViewSet(viewsets.ModelViewSet):
     serializer_class = FeedbackSerializer

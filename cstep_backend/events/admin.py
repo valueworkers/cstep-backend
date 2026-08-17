@@ -100,15 +100,47 @@ class ViewerSessionAdmin(admin.ModelAdmin):
     def is_active_display(self, obj):
         return obj.is_active
 
+from django.contrib import admin
+
+from .models import StreamRecording
+
 
 @admin.register(StreamRecording)
 class StreamRecordingAdmin(admin.ModelAdmin):
-    list_display = ("id", "broadcast_session", "status", "started_by", "started_at", "ended_at")
-    list_filter = ("status",)
-    search_fields = ("broadcast_session__name", "broadcast_session__event__title")
-    autocomplete_fields = ("broadcast_session", "started_by")
+    list_display = (
+        "id",
+        "session",
+        "event_name",
+        "status",
+        "started_at",
+        "ended_at",
+        "has_file",
+    )
+    list_filter = ("status", "started_at")
+    search_fields = (
+        "session__title",
+        "session__day__event__name",
+        "file_url",
+    )
+    autocomplete_fields = ("session",)
     readonly_fields = ("started_at",)
+    ordering = ("-started_at",)
+    date_hierarchy = "started_at"
+    list_select_related = ("session", "session__day", "session__day__event")
 
+    fieldsets = (
+        (None, {"fields": ("session", "status")}),
+        ("Timing", {"fields": ("started_at", "ended_at")}),
+        ("File", {"fields": ("file", "file_url")}),
+    )
+
+    @admin.display(description="Event")
+    def event_name(self, obj):
+        return obj.session.day.event.name
+
+    @admin.display(boolean=True, description="Has file")
+    def has_file(self, obj):
+        return bool(obj.file or obj.file_url)
 
 @admin.register(Feedback)
 class FeedbackAdmin(admin.ModelAdmin):

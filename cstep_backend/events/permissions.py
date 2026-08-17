@@ -13,7 +13,6 @@ class IsModeratorOrAbove(BasePermission):
     def has_permission(self, request, view):
         return request.user.is_authenticated and request.user.role in MODERATOR_ROLES
 
-
 class IsAuthenticatedViewer(BasePermission):
     """Any authenticated user can view live events."""
     def has_permission(self, request, view):
