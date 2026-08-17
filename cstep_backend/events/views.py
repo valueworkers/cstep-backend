@@ -762,8 +762,8 @@ class StreamRecordingViewSet(viewsets.ModelViewSet):
 
     def get_permissions(self):
         if self.action in ("list", "retrieve"):
-            return [IsAuthenticated]
-        return [IsModeratorOrAbove]
+            return [IsAuthenticated()]
+        return [IsModeratorOrAbove()]
         
     def get_serializer_context(self):
         context = super().get_serializer_context()

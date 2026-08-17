@@ -62,11 +62,13 @@ class RegistrationViewSet(viewsets.ModelViewSet):
     )
 
     filterset_fields = {
-        "status":             ["exact", "in"],
-        "event":              ["exact"],
-        "event__title":       ["exact", "icontains"],
-        "user":               ["exact"],
-        "created_at":         ["date", "gte", "lte"],
+        "status": ["exact", "in"],
+        'event_id':['exact'],
+        'days__day__date': ['exact'],
+        'days__attendance_mode': ['exact'],
+        "event__title": ["exact", "icontains"],
+        "user": ["exact"],
+        "created_at": ["date", "gte", "lte"],
     }
 
     search_fields = [

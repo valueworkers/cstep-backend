@@ -230,8 +230,7 @@ class EventCreateUpdateSerializer(serializers.ModelSerializer):
         return event
 
 class StreamRecordingSerializer(serializers.ModelSerializer):
-    day_id = serializers.IntegerField(source="session.day_id", read_only=True)
-    event_id = serializers.IntegerField(source="session.day.event_id", read_only=True)
+    date = serializers.DateField(source="session.day.date", read_only=True)
     session_title = serializers.CharField(source="session.title", read_only=True)
 
     class Meta:
@@ -239,16 +238,15 @@ class StreamRecordingSerializer(serializers.ModelSerializer):
         fields = [
             "id",
             "session",
-            "session_title"
-            "day_id",
-            "event_id",
+            "date",
+            "session_title",
             "started_at",
             "ended_at",
             "file",
             "file_url",
             "status",
         ]
-        read_only_fields = ["id", "started_at", "day_id", "event_id"]
+        read_only_fields = ["id", "started_at", "date", "session_title"]
 
     def validate_session(self, session):
         event = self.context.get("event")
