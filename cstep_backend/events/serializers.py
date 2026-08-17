@@ -659,7 +659,7 @@ class ReplyPreviewSerializer(serializers.ModelSerializer):
         return data
 
 class ChatMessageSerializer(serializers.ModelSerializer):
-    sender_name = serializers.CharField(source="sender.get_full_name", read_only=True)
+    sender_name = serializers.CharField(source="sender.full_name", read_only=True)
     reply_to = ReplyPreviewSerializer(read_only=True)
     reactions = serializers.SerializerMethodField()
 
