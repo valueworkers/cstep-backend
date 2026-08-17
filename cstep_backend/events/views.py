@@ -751,7 +751,6 @@ class StreamRecordingFilter(django_filters.FilterSet):
         model = StreamRecording
         fields = ["event_id", "day_id", "status", "session"]
 
-
 class StreamRecordingViewSet(viewsets.ModelViewSet):
     queryset = StreamRecording.objects.select_related("session__day__event")
     serializer_class = StreamRecordingSerializer
@@ -805,7 +804,11 @@ class ChatMessageViewSet(viewsets.ModelViewSet):
     http_method_names = ["get", "delete"]
 
     def get_queryset(self):
-        qs = ChatMessage.objects.filter(is_deleted=False).select_related("sender")
+        qs = (
+            ChatMessage.objects.filter(is_deleted=False)
+            .select_related("sender", "reply_to__sender")
+            .prefetch_related("reactions")
+        )
         event_id = self.request.query_params.get("event")
         if event_id:
             qs = qs.filter(event_id=event_id)

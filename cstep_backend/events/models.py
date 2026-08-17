@@ -7,7 +7,7 @@ from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.core.validators import MinValueValidator, MaxValueValidator
 from .media import build_whip_ingest_url, build_whep_playback_url
-from .constants import EventScheduleType, EventStatus, RecordingStatus,ScheduleItemType,default_attendance_modes
+from .constants import EventScheduleType, EventStatus, RecordingStatus,ScheduleItemType,ChatReactionType,default_attendance_modes
 from registrations.constants import AttendanceMode
 
 class Event(models.Model):
@@ -451,20 +451,48 @@ class ChatMessage(models.Model):
         on_delete=models.CASCADE,
         related_name="chat_messages",
     )
-
     sender = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
         related_name="chat_messages",
     )
-
+    reply_to = models.ForeignKey(
+        "self",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="replies",
+        help_text="Message being replied to. Any sender may reply to any message in the same event.",
+    )
     message = models.TextField()
-
     created_at = models.DateTimeField(auto_now_add=True)
-
     edited_at = models.DateTimeField(null=True, blank=True)
-
     is_deleted = models.BooleanField(default=False)
 
     class Meta:
         ordering = ["created_at"]
+
+    def clean(self):
+        if self.reply_to_id and self.reply_to.event_id != self.event_id:
+            raise ValidationError("Cannot reply to a message from a different event.")
+
+class MessageReaction(models.Model):
+    message = models.ForeignKey(
+        ChatMessage,
+        on_delete=models.CASCADE,
+        related_name="reactions",
+    )
+    sender = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="chat_reactions",
+    )
+    reaction_type = models.CharField(max_length=16, choices=ChatReactionType.choices)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["message", "sender"], name="one_reaction_per_sender_per_message"
+            ),
+        ]

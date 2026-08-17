@@ -1,16 +1,11 @@
 from datetime import timedelta
 from channels.exceptions import DenyConnection
-from channels.db import database_sync_to_async
-from channels.generic.websocket import AsyncJsonWebsocketConsumer
-from django.utils import timezone
-
 from channels.generic.websocket import AsyncJsonWebsocketConsumer
 from channels.db import database_sync_to_async
 from django.utils import timezone
 from .permissions import MODERATOR_ROLES
-from .models import Event, ChatMessage
+from .models import Event, ChatMessage,MessageReaction
 from .constants import ChatReactionType, MIN_SECONDS_BETWEEN_MESSAGES, MAX_MESSAGE_LENGTH, EDIT_WINDOW_SECONDS, DELETE_WINDOW_SECONDS
-from .chat_redis import increment_reaction, get_reaction_counts
 
 from .serializers import ChatMessageSerializer
 
@@ -194,35 +189,31 @@ class EventStreamConsumer(AsyncJsonWebsocketConsumer):
             ]
         )
 
-
 class ChatConsumer(AsyncJsonWebsocketConsumer):
     async def connect(self):
         self.user = self.scope["user"]
         self.event_id = self.scope["url_route"]["kwargs"]["event_id"]
         self.group_name = f"chat_{self.event_id}"
         self._last_sent_at = None
- 
+
         if not self.user or not self.user.is_authenticated:
             await self.close(code=4001)
             return
- 
+
         if not await self._event_exists(self.event_id):
             await self.close(code=4004)
             return
- 
+
         await self.channel_layer.group_add(self.group_name, self.channel_name)
         await self.accept()
- 
+
         history = await self._get_recent_messages(self.event_id)
         await self.send_json({"type": "history", "messages": history})
- 
-        counts = await database_sync_to_async(get_reaction_counts)(self.event_id)
-        await self.send_json({"type": "reaction_counts", "counts": counts})
- 
+
     async def disconnect(self, close_code):
         if hasattr(self, "group_name"):
             await self.channel_layer.group_discard(self.group_name, self.channel_name)
- 
+
     async def receive_json(self, content, **kwargs):
         msg_type = content.get("type")
         if msg_type == "message":
@@ -235,9 +226,9 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
             await self._handle_delete(content)
         else:
             await self.send_json({"type": "error", "detail": "Unknown message type."})
- 
+
     # ---- incoming actions ----
- 
+
     async def _handle_message(self, content):
         text = (content.get("message") or "").strip()
         if not text:
@@ -247,18 +238,25 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
                 {"type": "error", "detail": f"Message too long (max {MAX_MESSAGE_LENGTH} chars)."}
             )
             return
- 
+
         now = timezone.now()
         if self._last_sent_at and (now - self._last_sent_at).total_seconds() < MIN_SECONDS_BETWEEN_MESSAGES:
             await self.send_json({"type": "error", "detail": "You're sending messages too fast."})
             return
         self._last_sent_at = now
- 
-        message = await self._create_message(self.event_id, self.user.id, text)
+
+        reply_to_id = content.get("reply_to")
+        if reply_to_id is not None:
+            reply_to_id = await self._resolve_reply_to(reply_to_id, self.event_id)
+            if reply_to_id is None:
+                await self.send_json({"type": "error", "detail": "Cannot reply to that message."})
+                return
+
+        message = await self._create_message(self.event_id, self.user.id, text, reply_to_id)
         await self.channel_layer.group_send(
             self.group_name, {"type": "chat.message.broadcast", "message": message}
         )
- 
+
     async def _handle_edit(self, content):
         message_id = content.get("message_id")
         new_text = (content.get("message") or "").strip()
@@ -280,19 +278,25 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
 
         await self.channel_layer.group_send(
             self.group_name, {"type": "chat.edit.broadcast", "message": message}
-        ) 
+        )
 
     async def _handle_reaction(self, content):
+        message_id = content.get("message_id")
         reaction_type = content.get("reaction")
-        if reaction_type not in {choice.value for choice in ChatReactionType}:
-            await self.send_json({"type": "error", "detail": "Invalid reaction type."})
+        if not message_id or reaction_type not in {choice.value for choice in ChatReactionType}:
+            await self.send_json({"type": "error", "detail": "Invalid reaction."})
             return
- 
-        counts = await database_sync_to_async(self._increment_and_get)(self.event_id, reaction_type)
+
+        result = await self._toggle_reaction(message_id, self.event_id, self.user.id, reaction_type)
+        if result is None:
+            await self.send_json({"type": "error", "detail": "Message not found."})
+            return
+
         await self.channel_layer.group_send(
-            self.group_name, {"type": "chat.reaction.broadcast", "counts": counts}
+            self.group_name,
+            {"type": "chat.reaction.broadcast", "message_id": message_id, "reactions": result},
         )
- 
+
     async def _handle_delete(self, content):
         message_id = content.get("message_id")
         if not message_id:
@@ -313,49 +317,56 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
         await self.channel_layer.group_send(
             self.group_name, {"type": "chat.delete.broadcast", "message_id": message_id}
         )
- 
+
     # ---- group event handlers: fan out to this socket ----
- 
+
     async def chat_message_broadcast(self, event):
         await self.send_json({"type": "message", "message": event["message"]})
- 
+
     async def chat_edit_broadcast(self, event):
         await self.send_json({"type": "message_edited", "message": event["message"]})
- 
+
     async def chat_reaction_broadcast(self, event):
-        await self.send_json({"type": "reaction_counts", "counts": event["counts"]})
- 
+        await self.send_json(
+            {"type": "reaction_update", "message_id": event["message_id"], "reactions": event["reactions"]}
+        )
+
     async def chat_delete_broadcast(self, event):
         await self.send_json({"type": "message_deleted", "message_id": event["message_id"]})
- 
+
     # ---- helpers ----
- 
-    @staticmethod
-    def _increment_and_get(event_id, reaction_type):
-        increment_reaction(event_id, reaction_type)
-        return get_reaction_counts(event_id)
- 
+
     @database_sync_to_async
     def _event_exists(self, event_id):
         return Event.objects.filter(pk=event_id).exists()
- 
+
     @database_sync_to_async
-    def _create_message(self, event_id, user_id, text):
-        msg = ChatMessage.objects.select_related("sender").get(
-            pk=ChatMessage.objects.create(event_id=event_id, sender_id=user_id, message=text).pk
+    def _resolve_reply_to(self, reply_to_id, event_id):
+        """Returns the id if valid (exists, same event), else None. Replying to
+        an already-deleted message is allowed — the preview just shows
+        'This message was deleted.', same as WhatsApp."""
+        exists = ChatMessage.objects.filter(pk=reply_to_id, event_id=event_id).exists()
+        return reply_to_id if exists else None
+
+    @database_sync_to_async
+    def _create_message(self, event_id, user_id, text, reply_to_id):
+        msg = ChatMessage.objects.create(
+            event_id=event_id, sender_id=user_id, message=text, reply_to_id=reply_to_id
         )
+        msg = ChatMessage.objects.select_related("sender", "reply_to__sender").get(pk=msg.pk)
         return ChatMessageSerializer(msg).data
- 
+
     @database_sync_to_async
     def _get_recent_messages(self, event_id, limit=50):
         qs = (
             ChatMessage.objects.filter(event_id=event_id, is_deleted=False)
-            .select_related("sender")
+            .select_related("sender", "reply_to__sender")
+            .prefetch_related("reactions")
             .order_by("-created_at")[:limit]
         )
         messages = list(reversed(list(qs)))
         return ChatMessageSerializer(messages, many=True).data
- 
+
     @database_sync_to_async
     def _edit_message(self, message_id, event_id, user_id, new_text):
         """Owner-only, and only within EDIT_WINDOW_SECONDS of sending —
@@ -371,9 +382,36 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
         ).update(message=new_text, edited_at=timezone.now())
         if not updated:
             return None
-        msg = ChatMessage.objects.select_related("sender").get(pk=message_id)
+        msg = ChatMessage.objects.select_related("sender", "reply_to__sender").get(pk=message_id)
         return ChatMessageSerializer(msg).data
- 
+
+    @database_sync_to_async
+    def _toggle_reaction(self, message_id, event_id, user_id, reaction_type):
+        """Returns the message's grouped reaction list, or None if the message
+        doesn't exist in this event. Same type sent twice untoggles it;
+        a different type just replaces the sender's existing reaction."""
+        if not ChatMessage.objects.filter(pk=message_id, event_id=event_id).exists():
+            return None
+
+        existing = MessageReaction.objects.filter(message_id=message_id, sender_id=user_id).first()
+        if existing and existing.reaction_type == reaction_type:
+            existing.delete()
+        elif existing:
+            existing.reaction_type = reaction_type
+            existing.save(update_fields=["reaction_type"])
+        else:
+            MessageReaction.objects.create(
+                message_id=message_id, sender_id=user_id, reaction_type=reaction_type
+            )
+
+        grouped = {}
+        for r in MessageReaction.objects.filter(message_id=message_id):
+            grouped.setdefault(r.reaction_type, []).append(r.sender_id)
+        return [
+            {"reaction": reaction_type, "count": len(sender_ids), "sender_ids": sender_ids}
+            for reaction_type, sender_ids in grouped.items()
+        ]
+
     @database_sync_to_async
     def _soft_delete_message(self, message_id, event_id, user):
         """Moderators can delete any message at any time. Regular senders

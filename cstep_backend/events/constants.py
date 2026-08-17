@@ -3,7 +3,11 @@ from django.db import models
 class ChatReactionType(models.TextChoices):
     LIKE = "like", "👍"
     LOVE = "love", "❤️"
-    CLAP = "clap", "🙌"
+    LAUGH = "laugh", "😂"
+    WOW = "wow", "😮"
+    SAD = "sad", "😢"
+    ANGRY = "angry", "😠"
+
 
 MIN_SECONDS_BETWEEN_MESSAGES = 1.0
 MAX_MESSAGE_LENGTH = 500

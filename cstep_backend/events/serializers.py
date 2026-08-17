@@ -644,15 +644,41 @@ class FeedbackSerializer(serializers.ModelSerializer):
         )
         return qs.exists()
 
-class ChatMessageSerializer(serializers.ModelSerializer):
-    sender_id = serializers.IntegerField(source="sender.id", read_only=True)
-    sender_name = serializers.SerializerMethodField()
- 
+# Chats
+class ReplyPreviewSerializer(serializers.ModelSerializer):
+    sender_name = serializers.CharField(source="sender.get_full_name", read_only=True)
+
     class Meta:
         model = ChatMessage
-        fields = ["id", "event", "sender_id", "sender_name", "message", "created_at", "edited_at", "is_deleted"]
-        read_only_fields = ["event", "created_at", "edited_at", "is_deleted"]
- 
-    def get_sender_name(self, obj):
-        return obj.sender.full_name()
- 
+        fields = ["id", "sender", "sender_name", "message", "is_deleted"]
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        if instance.is_deleted:
+            data["message"] = "This message was deleted."
+        return data
+
+class ChatMessageSerializer(serializers.ModelSerializer):
+    sender_name = serializers.CharField(source="sender.get_full_name", read_only=True)
+    reply_to = ReplyPreviewSerializer(read_only=True)
+    reactions = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ChatMessage
+        fields = [
+            "id", "event", "sender", "sender_name", "message",
+            "reply_to", "reactions", "created_at", "edited_at", "is_deleted",
+        ]
+        read_only_fields = fields
+
+    def get_reactions(self, obj):
+        """Grouped by type: [{"reaction": "love", "count": 3, "sender_ids": [...]}, ...].
+        sender_ids lets each client derive its own reaction state without a
+        per-user query."""
+        grouped = {}
+        for r in obj.reactions.all():
+            grouped.setdefault(r.reaction_type, []).append(r.sender_id)
+        return [
+            {"reaction": reaction_type, "count": len(sender_ids), "sender_ids": sender_ids}
+            for reaction_type, sender_ids in grouped.items()
+        ]
