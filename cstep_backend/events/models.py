@@ -8,6 +8,7 @@ from django.core.exceptions import ValidationError
 from django.core.validators import MinValueValidator, MaxValueValidator
 from .media import build_whip_ingest_url, build_whep_playback_url
 from .constants import EventScheduleType, EventStatus, RecordingStatus,ScheduleItemType,ChatReactionType,default_attendance_modes
+from .media import recording_upload_path
 from registrations.constants import AttendanceMode
 
 class Event(models.Model):
@@ -371,7 +372,7 @@ class StreamRecording(models.Model):
     started_at = models.DateTimeField(auto_now_add=True)
     ended_at = models.DateTimeField(null=True, blank=True)
  
-    file = models.FileField(upload_to="recordings/%Y/%m/%d/", blank=True, null=True)
+    file = models.FileField(upload_to=recording_upload_path, blank=True, null=True)
     # Kept alongside `file` for recordings that live on external storage
     # (CDN / signed S3 URL) instead of being uploaded through this API.
     # Drop this if every recording will always go through `file`.
