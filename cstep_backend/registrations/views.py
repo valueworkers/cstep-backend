@@ -6,7 +6,7 @@ from rest_framework.exceptions import PermissionDenied
 from django.utils import timezone
 from django.shortcuts import get_object_or_404
 from django.db import transaction
-
+from django.db.models import Prefetch
 
 from .permissions import IsModeratorOrAbove
 from accounts.models import UserRole, User
@@ -28,34 +28,10 @@ from .serializers import (
 )
 
 class RegistrationViewSet(viewsets.ModelViewSet):
-    """
-    create:  POST /registrations/     — registers the user AND their
-                                         attendance mode(s)/sessions/days in one call:
-        MULTI_SESSION event → {"event": 5, "session_ids": [11, 14, 18],
-                                "attendance_modes": [{"day_id": 1, "attendance_mode": "IN_PERSON"}], ...}
-        WHOLE_DAY event      → {"event": 5, "day_ids": [1, 2],
-                                "attendance_modes": [{"day_id": 1, "attendance_mode": "ONLINE"}, ...], ...}
-    my:      GET  /registrations/my/  — authenticated user's own registrations
-    list/detail/update/destroy        — Moderator+
-
-    Registration-level accept/reject/hold — Moderator/EventAdmin:
-      POST   /registrations/{id}/approve/
-      POST   /registrations/{id}/reject/
-      POST   /registrations/{id}/hold/
-      PATCH  /registrations/bulk-status/
-
-    Self-service drop of a single session:
-      DELETE /registrations/{id}/sessions/{session_reg_id}/
-
-    Day-level and session-level accept/reject/hold now live on their own
-    ViewSets — see RegistrationDayViewSet / RegistrationSessionViewSet.
-    """
-
     queryset = (
         Registration.objects
-        .select_related("user", "event", "medical_assistance", "translation_assistance", "accommodation_assistance")
+        .select_related("user", "event")
         .prefetch_related(
-            "travel_assistance",
             "days__day",
             "sessions__session__day",
         )
@@ -64,8 +40,6 @@ class RegistrationViewSet(viewsets.ModelViewSet):
     filterset_fields = {
         "status": ["exact", "in"],
         'event_id':['exact'],
-        'days__day__date': ['exact'],
-        'days__attendance_mode': ['exact'],
         "event__title": ["exact", "icontains"],
         "user": ["exact"],
         "created_at": ["date", "gte", "lte"],
@@ -105,16 +79,25 @@ class RegistrationViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         queryset = Registration.objects.select_related(
-            "user",
-            "event",
-            "medical_assistance",
-            "translation_assistance",
-            "accommodation_assistance",
-        ).prefetch_related(
-            "travel_assistance",
-            "days__day",
-            "sessions__session__day",
+            "user", "event", "medical_assistance",
+            "translation_assistance", "accommodation_assistance",
         )
+
+        days_qs = RegistrationDay.objects.select_related("day")
+
+        day_id = self.request.query_params.get("day_id")
+        attendance_mode = self.request.query_params.get("attendance_mode")
+
+        if day_id:
+            days_qs = days_qs.filter(day_id=day_id)
+        if attendance_mode:
+            days_qs = days_qs.filter(attendance_mode=attendance_mode)
+
+        queryset = queryset.prefetch_related(
+            "travel_assistance",
+            Prefetch("days", queryset=days_qs),
+            "sessions__session__day",
+        ).distinct()
 
         if self.action == "list":
             return queryset.select_related("user", "event")
