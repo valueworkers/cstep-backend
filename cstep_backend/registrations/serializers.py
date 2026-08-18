@@ -309,25 +309,33 @@ class RegistrationSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         session_data = validated_data.pop("sessions")
+        user = validated_data["user"]
+        event = validated_data["event"]
+
+        attendance_modes = []
+        session_ids = []
+        for item in session_data:
+            attendance_modes.append({
+                "day_id": item["day"].id,
+                "attendance_mode": item["attendance_mode"]
+            })
+            session_ids.extend(item["session_ids"])
 
         with transaction.atomic():
-            registration = Registration.objects.create(**validated_data)
-
-            attendance_modes = []
-            session_ids = []
-
-            for item in session_data:
-                attendance_modes.append({
-                    "day_id": item["day"].id,
-                    "attendance_mode": item["attendance_mode"]
-                })
-
-                session_ids.extend(item["session_ids"])
-
-            registration.create_registration(
-                attendance_modes=attendance_modes,
-                session_ids=session_ids
+            registration, created = Registration.objects.get_or_create(
+                user=user, event=event,
             )
+
+            if created:
+                registration.create_registration(
+                    attendance_modes=attendance_modes,
+                    session_ids=session_ids,
+                )
+            else:
+                registration.update_registration(
+                    attendance_modes=attendance_modes,
+                    session_ids=session_ids,
+                )
 
         return registration
 
