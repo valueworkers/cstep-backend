@@ -6,7 +6,7 @@ from rest_framework.exceptions import PermissionDenied
 from django.utils import timezone
 from django.shortcuts import get_object_or_404
 from django.db import transaction
-from django.db.models import Prefetch
+from django.db.models import Prefetch, Q
 
 from .permissions import IsModeratorOrAbove
 from accounts.models import UserRole, User
@@ -88,10 +88,24 @@ class RegistrationViewSet(viewsets.ModelViewSet):
         day_id = self.request.query_params.get("day_id")
         attendance_mode = self.request.query_params.get("attendance_mode")
 
+        days_filter = Q()
         if day_id:
-            days_qs = days_qs.filter(day_id=day_id)
+            days_filter &= Q(day_id=day_id)
         if attendance_mode:
-            days_qs = days_qs.filter(attendance_mode=attendance_mode)
+            days_filter &= Q(attendance_mode=attendance_mode)
+
+        if days_filter:
+            # filter the prefetched days themselves
+            days_qs = days_qs.filter(days_filter)
+
+            # also filter the outer queryset so registrations
+            # with no matching day are excluded entirely
+            outer_q = Q()
+            if day_id:
+                outer_q &= Q(days__day_id=day_id)
+            if attendance_mode:
+                outer_q &= Q(days__attendance_mode=attendance_mode)
+            queryset = queryset.filter(outer_q)
 
         queryset = queryset.prefetch_related(
             "travel_assistance",
@@ -106,7 +120,6 @@ class RegistrationViewSet(viewsets.ModelViewSet):
             return queryset.filter(user=self.request.user)
 
         return queryset
-
     def _get_owned_registration_or_403(self, request, pk):
         registration = get_object_or_404(Registration, pk=pk)
         is_staff_role = request.user.role in {UserRole.MODERATOR, UserRole.EVENT_ADMIN, UserRole.SUPER_ADMIN}
