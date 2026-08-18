@@ -147,6 +147,8 @@ class RegistrationDaySerializer(serializers.ModelSerializer):
 class RegistrationListSerializer(serializers.ModelSerializer):
     user_name = serializers.CharField(source="user.full_name", read_only=True)
     phone_number = serializers.CharField(source="user.phone_number", read_only=True)
+    org_name = serializers.CharField(source="user.org_name", read_only=True)
+    designation = serializers.CharField(source="user.designation", read_only=True)
     email = serializers.EmailField(source="user.email", read_only=True)
     registered_sessions_count = serializers.IntegerField(source="sessions.count", read_only=True)
     registration_dates = serializers.SerializerMethodField()
@@ -154,8 +156,8 @@ class RegistrationListSerializer(serializers.ModelSerializer):
     class Meta:
         model = Registration
         fields = [
-            "id", "user", "user_name", "phone_number", "email",
-            "event", "registration_dates", "registered_sessions_count",
+            "id", "user", "user_name", "phone_number", "org_name","designation",
+            "email", "event", "registration_dates", "registered_sessions_count",
             "status", "created_at", "updated_at",
         ]
         read_only_fields = fields

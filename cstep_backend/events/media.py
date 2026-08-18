@@ -4,7 +4,21 @@ No model imports here, so models.py / serializers.py / utils.py can import this
 without creating a circular dependency.
 """
 
+import os
 from django.conf import settings
+from django.utils.text import slugify
+
+
+def recording_upload_path(instance, filename):
+    session = instance.session
+    day = session.day
+    event = day.event
+
+    ext = os.path.splitext(filename)[1].lower()  # includes the dot
+    event_slug = slugify(event.title)
+    date_str = day.date.strftime("%Y-%m-%d")
+
+    return f"recordings/{event_slug}/{date_str}/session-{session.order}{ext}"
 
 
 def _rtmp_base_url() -> str:
