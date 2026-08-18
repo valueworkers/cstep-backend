@@ -211,6 +211,10 @@ CORS_ALLOW_ALL_ORIGINS = True  # Tighten in production
 # ─── Static & Media ───────────────────────────────────────────────────────────
 
 STORAGES = {
+    "default": {
+        "BACKEND": "django.core.files.storage.FileSystemStorage",
+    },
+ 
     "staticfiles": {
         "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
     }
