@@ -650,12 +650,28 @@ class LiveAnalyticsService:
         days = EventDay.objects.filter(event=self.event)
         if day_id:
             days = days.filter(id=day_id)
+
+        event_started = timezone.now() >= self.event.scheduled_start
+
         for day in days.order_by("day_number"):
+            if not event_started:
+                rows.append({
+                    "day_id": day.id,
+                    "day_number": day.day_number,
+                    "registered": 0,
+                    "attended": 0,
+                    "no_show": 0,
+                })
+                continue
+
             registered = set(
-                RegistrationDay.objects.filter(day=day, attendance_mode=AttendanceMode.VIRTUAL)
-                .values_list("registration__user_id", flat=True)
+                RegistrationDay.objects.filter(
+                    day=day, attendance_mode=AttendanceMode.VIRTUAL
+                ).values_list("registration__user_id", flat=True)
             )
-            attended = set(ViewerSession.objects.filter(day=day).values_list("user_id", flat=True))
+            attended = set(
+                ViewerSession.objects.filter(day=day).values_list("user_id", flat=True)
+            )
             rows.append({
                 "day_id": day.id,
                 "day_number": day.day_number,
@@ -663,8 +679,8 @@ class LiveAnalyticsService:
                 "attended": len(registered & attended),
                 "no_show": len(registered - attended),
             })
-        return rows
 
+        return rows
     # ---------- Visual 8: Feedback ----------
     def session_wise_feedback(self, session_id=None, day_id=None):
         qs = Feedback.objects.filter(event=self.event, is_overall_rating=False)
