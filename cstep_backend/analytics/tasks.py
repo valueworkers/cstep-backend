@@ -17,7 +17,8 @@ def push_live_analytics():
     channel_layer = get_channel_layer()
     active_ids = get_active_event_ids()
 
-    events_qs = Event.objects.filter(status=EventStatus.LIVE)
+    events_qs = Event.objects.all()
+
     if active_ids is not None:
         events_qs = events_qs.filter(id__in=active_ids)
 

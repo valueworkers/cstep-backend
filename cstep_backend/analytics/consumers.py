@@ -4,11 +4,11 @@ from urllib.parse import parse_qs
 from channels.db import database_sync_to_async
 from djangochannelsrestframework.consumers import AsyncAPIConsumer
 from djangochannelsrestframework.decorators import action
-from djangochannelsrestframework.permissions import BasePermission
 
 from events.models import Event
 
 from .services import LiveAnalyticsService
+from .permissions import *
 from .registry import (
     register_connection,
     unregister_connection,
@@ -19,29 +19,25 @@ from .registry import (
 
 logger = logging.getLogger(__name__)
 
-MODERATOR_ROLES = ("MODERATOR", "EVENT_ADMIN", "SUPER_ADMIN")
-
-CLOSE_NO_USER = 4001
-CLOSE_UNAUTHORIZED = 4003
-CLOSE_EVENT_NOT_FOUND = 4004
-
-
-class IsModeratorOrAbove(BasePermission):
-    def has_permission(self, scope, consumer, action, **kwargs):
-        user = scope.get("user")
-        return getattr(user, "role", None) in MODERATOR_ROLES
-
 
 class LiveAnalyticsConsumer(AsyncAPIConsumer):
     """
     Relays 'analytics.update' broadcasts from push_live_analytics (tasks.py),
-    filtered to whichever visuals this connection has subscribed to.
+    filtered to whichever visuals this connection has subscribed to, and
+    optionally scoped per-visual to a day_id/session_id.
 
-    Client subscribes to a visual by sending its name as the action, e.g.
-    {"action": "no_show"}. self.requested_visuals is a plain set of the
-    keys this connection currently wants, mirrored in Redis (registry.py)
-    so push_live_analytics only builds what's actually subscribed to,
-    across all open sockets for an event.
+    Client subscribes to a visual (and optionally filters it) by sending
+    its name as the action plus optional day_id/session_id, e.g.
+    {"action": "no_show"} or {"action": "session_wise_feedback", "session_id": 12}.
+    Re-sending the same action with different (or no) day_id/session_id
+    changes/clears the filter for that visual.
+
+    self.requested_visuals is the set of visual keys this connection wants
+    (mirrored in Redis so push_live_analytics only builds what's actually
+    subscribed to, across all open sockets for an event). self.visual_filters
+    tracks any per-visual day_id/session_id scoping, which is connection-
+    local only (not shared via Redis) since it doesn't affect what the
+    periodic task needs to build for the group.
     """
     permission_classes = [IsModeratorOrAbove]
 
@@ -49,6 +45,7 @@ class LiveAnalyticsConsumer(AsyncAPIConsumer):
         self.event_id = int(self.scope["url_route"]["kwargs"]["event_id"])
         self.group_name = f"live_analytics_{self.event_id}"
         self.requested_visuals = set()
+        self.visual_filters = {}
         self._registered = False
 
         user = self.scope.get("user")
@@ -63,8 +60,8 @@ class LiveAnalyticsConsumer(AsyncAPIConsumer):
             await self._reject(CLOSE_UNAUTHORIZED, "permission_denied", "Not permitted to view this event's analytics.")
             return
 
-        event_exists = await database_sync_to_async(Event.objects.filter(id=self.event_id).exists)()
-        if not event_exists:
+        self.event = await database_sync_to_async(Event.objects.filter(id=self.event_id).first)()
+        if self.event is None:
             await self._reject(CLOSE_EVENT_NOT_FOUND, "not_found", f"Event {self.event_id} does not exist.")
             return
 
@@ -78,9 +75,6 @@ class LiveAnalyticsConsumer(AsyncAPIConsumer):
             await database_sync_to_async(add_visual)(self.event_id, visual)
 
     async def _reject(self, close_code, error_code, message):
-        """Accept briefly to send one JSON error frame (ASGI requires accept
-        before send), then close. Lets the frontend read a real error
-        instead of just a numeric close code."""
         await self.accept()
         await self.send_json({
             "action": "connect",
@@ -91,72 +85,101 @@ class LiveAnalyticsConsumer(AsyncAPIConsumer):
 
     async def disconnect(self, code):
         if not self._registered:
-            return  # rejected during connect() — nothing to clean up
+            return
         await self.channel_layer.group_discard(self.group_name, self.channel_name)
         await database_sync_to_async(unregister_connection)(self.event_id)
         await database_sync_to_async(remove_visuals)(self.event_id, self.requested_visuals)
-    async def _subscribe(self, visual):
+
+    async def _subscribe(self, visual, day_id=None, session_id=None):
         if visual not in self.requested_visuals:
             self.requested_visuals.add(visual)
             await database_sync_to_async(add_visual)(self.event_id, visual)
-        return {"subscribed": sorted(self.requested_visuals)}, 200
 
-    # One action per visual key. Client sends {"action": "no_show"} etc.
-    @action()
-    async def statewise_login(self, **kwargs):
-        return await self._subscribe("statewise_login")
+        self.visual_filters[visual] = (
+            {"day_id": day_id, "session_id": session_id} if (day_id or session_id) else {}
+        )
 
-    @action()
-    async def countrywise_login(self, **kwargs):
-        return await self._subscribe("countrywise_login")
+        # Fresh filtered snapshot right away, rather than waiting for the
+        # next periodic push, so changing a filter feels immediate.
+        data = await self._query_visual(visual, day_id, session_id)
+        return {
+            "subscribed": sorted(self.requested_visuals),
+            "filters": {v: f for v, f in self.visual_filters.items() if f},
+            "data": {visual: data},
+        }, 200
 
-    @action()
-    async def daywise_login(self, **kwargs):
-        return await self._subscribe("daywise_login")
-
-    @action()
-    async def session_wise_max_virtual(self, **kwargs):
-        return await self._subscribe("session_wise_max_virtual")
-
-    @action()
-    async def no_show(self, **kwargs):
-        return await self._subscribe("no_show")
+    @database_sync_to_async
+    def _query_visual(self, visual, day_id, session_id):
+        service = LiveAnalyticsService(self.event)
+        return service.build_payload(visuals=[visual], day_id=day_id, session_id=session_id).get(visual)
 
     @action()
-    async def session_wise_feedback(self, **kwargs):
-        return await self._subscribe("session_wise_feedback")
+    async def statewise_login(self, day_id=None, session_id=None, **kwargs):
+        return await self._subscribe("statewise_login", day_id=day_id, session_id=session_id)
 
     @action()
-    async def daywise_feedback(self, **kwargs):
-        return await self._subscribe("daywise_feedback")
+    async def countrywise_login(self, day_id=None, session_id=None, **kwargs):
+        return await self._subscribe("countrywise_login", day_id=day_id, session_id=session_id)
 
     @action()
-    async def chats(self, **kwargs):
-        return await self._subscribe("chats")
+    async def daywise_login(self, day_id=None, session_id=None, **kwargs):
+        return await self._subscribe("daywise_login", day_id=day_id, session_id=session_id)
 
     @action()
-    async def participation_rate(self, **kwargs):
-        return await self._subscribe("participation_rate")
+    async def session_wise_max_virtual(self, day_id=None, session_id=None, **kwargs):
+        return await self._subscribe("session_wise_max_virtual", day_id=day_id, session_id=session_id)
 
     @action()
-    async def participation_time(self, **kwargs):
-        return await self._subscribe("participation_time")
-    
+    async def no_show(self, day_id=None, session_id=None, **kwargs):
+        return await self._subscribe("no_show", day_id=day_id, session_id=session_id)
+
     @action()
-    async def participation_duration(self, **kwargs):
-        return await self._subscribe("participation_duration")
+    async def session_wise_feedback(self, day_id=None, session_id=None, **kwargs):
+        return await self._subscribe("session_wise_feedback", day_id=day_id, session_id=session_id)
+
+    @action()
+    async def daywise_feedback(self, day_id=None, session_id=None, **kwargs):
+        return await self._subscribe("daywise_feedback", day_id=day_id, session_id=session_id)
+
+    @action()
+    async def chats(self, day_id=None, session_id=None, **kwargs):
+        return await self._subscribe("chats", day_id=day_id, session_id=session_id)
+
+    @action()
+    async def participation_rate(self, day_id=None, session_id=None, **kwargs):
+        return await self._subscribe("participation_rate", day_id=day_id, session_id=session_id)
+
+    @action()
+    async def participation_time(self, day_id=None, session_id=None, **kwargs):
+        return await self._subscribe("participation_time", day_id=day_id, session_id=session_id)
+
+    @action()
+    async def participation_duration(self, day_id=None, session_id=None, **kwargs):
+        return await self._subscribe("participation_duration", day_id=day_id, session_id=session_id)
 
     # ---- plain Channels group-send handler, not a DCRF @action ----
     async def analytics_update(self, event):
-        await self.send_json({"type": "update", "data": self._filter_payload(event["data"])})
+        payload = await self._build_response(event["data"])
+        await self.send_json({"type": "update", "data": payload})
 
-    def _filter_payload(self, payload):
-        keep = {"event_id", "generated_at"} | self.requested_visuals
-        return {k: v for k, v in payload.items() if k in keep}
+    async def _build_response(self, broadcast_data):
+        result = {k: broadcast_data[k] for k in ("event_id", "generated_at") if k in broadcast_data}
+
+        for visual in self.requested_visuals:
+            filt = self.visual_filters.get(visual) or {}
+            if filt:
+                # Filtered connections re-query directly. Not every visual's
+                # rows carry enough identifying fields (chats totals,
+                # statewise/countrywise logins) to slice the unfiltered
+                # broadcast payload post-hoc, so this stays consistent
+                # rather than being correct only for some visuals.
+                result[visual] = await self._query_visual(visual, filt.get("day_id"), filt.get("session_id"))
+            elif visual in broadcast_data:
+                result[visual] = broadcast_data[visual]
+
+        return result
 
     def _parse_visuals_from_query_string(self):
-        """?visuals=no_show,statewise_login on the ws URL. No param, or an
-        empty value -> empty set (subscribe to nothing until actions are sent)."""
         qs = parse_qs(self.scope.get("query_string", b"").decode())
         raw = qs.get("visuals", [""])[0]
         return {v.strip() for v in raw.split(",") if v.strip()}
