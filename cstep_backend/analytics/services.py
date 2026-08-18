@@ -501,13 +501,16 @@ class LiveAnalyticsService:
             self._viewer_sessions_by_session = by_session
         return self._viewer_sessions_by_session
 
-    def _sessions_filtered(self, session_id=None):
+    def _sessions_filtered(self, session_id=None, day_id=None):
         """Filters a local copy so callers that need the full `sessions`
         cache (e.g. session_wise_max_virtual sharing a rate_table with
         participation_rate) aren't affected by another call's filter."""
-        if session_id is None:
-            return self.sessions
-        return [s for s in self.sessions if s.id == session_id]
+        sessions = self.sessions
+        if session_id is not None:
+            sessions = [s for s in sessions if s.id == session_id]
+        if day_id is not None:
+            sessions = [s for s in sessions if s.day_id == day_id]
+        return sessions
 
     # ---------- helpers ----------
 
@@ -540,41 +543,39 @@ class LiveAnalyticsService:
         return min(idx, num_buckets - 1)  # anyone who outlasts the session lands in the last tick
 
     # ---------- Visual 1: Participation Time ----------
-    def participation_time_table(self, session_id=None):
+    def participation_time_table(self, session_id=None, day_id=None):
         rows = []
         combined_totals = {}
- 
-        for s in self._sessions_filtered(session_id):
+
+        for s in self._sessions_filtered(session_id=session_id, day_id=day_id):
             duration_min = self._session_duration_minutes(s)
             ticks = self._duration_buckets(duration_min)
             counts = {tick: 0 for tick in ticks}
- 
+
             vs_list = self.viewer_sessions_by_session.get(s.id, [])
             unique_users = {vs.user_id for vs in vs_list}
             for vs in vs_list:
                 minutes = self._duration_seconds(vs) / 60
                 tick = ticks[self._bucket_index(minutes, len(ticks))]
                 counts[tick] += 1
- 
+
             rows.append({
                 "session_id": s.id,
                 "session_name": s.title,
                 "session_duration_min": duration_min,
                 "unique_participants": len(unique_users),
-                # string keys: msgpack (WS broadcast) and JSON both reject
-                # int dict keys, so convert here rather than downstream.
                 "buckets": {str(tick): count for tick, count in counts.items()},
             })
- 
+
             for tick, count in counts.items():
                 combined_totals[tick] = combined_totals.get(tick, 0) + count
- 
+
         return {"rows": rows}
- 
+
     # ---------- Visual 2: Participation Rate ----------
-    def participation_rate_table(self, interval_minutes=5, session_id=None):
+    def participation_rate_table(self, interval_minutes=5, session_id=None, day_id=None):
         rows = []
-        for s in self._sessions_filtered(session_id):
+        for s in self._sessions_filtered(session_id=session_id, day_id=day_id):
             start_dt = self._aware(datetime.combine(s.day.date, s.start_time))
             end_dt = self._aware(datetime.combine(s.day.date, s.end_time))
             last_point = min(self.now, end_dt)
@@ -606,8 +607,8 @@ class LiveAnalyticsService:
         return {"rows": rows}
 
     # ---------- Visual 4: Session Wise Max Virtual Participant Count ----------
-    def session_wise_max_virtual(self, rate_table=None, session_id=None):
-        rate_table = rate_table or self.participation_rate_table(session_id=session_id)
+    def session_wise_max_virtual(self, rate_table=None, session_id=None, day_id=None):
+        rate_table = rate_table or self.participation_rate_table(session_id=session_id, day_id=day_id)
         return [
             {
                 "session_id": r["session_id"],
@@ -619,12 +620,6 @@ class LiveAnalyticsService:
 
     # ---------- Visual 5: Statewise Login ----------
     def statewise_login(self, day_id=None):
-        """
-        Unique viewers by state — sourced only from ViewerSession.state (captured
-        per join), so this only counts users who actually joined a viewer session.
-        No Registration/user lookup, since physical registrants may never join
-        a ViewerSession at all and shouldn't be counted as a "login".
-        """
         qs = ViewerSession.objects.filter(event=self.event).exclude(state="")
         if day_id:
             qs = qs.filter(day_id=day_id)
@@ -640,7 +635,6 @@ class LiveAnalyticsService:
         return list(qs.values("country").annotate(count=Count("user", distinct=True)).order_by("-count"))
 
     def daywise_login(self, day_id=None):
-        """Unique viewers per day — includes lobby/general watching, not just session watchers."""
         qs = ViewerSession.objects.filter(event=self.event, day__isnull=False)
         if day_id:
             qs = qs.filter(day_id=day_id)
@@ -652,7 +646,6 @@ class LiveAnalyticsService:
 
     # ---------- Visual 7: No Show (per day) ----------
     def no_show(self, day_id=None):
-        """Per-day no-show: virtual registrants for that day vs anyone who actually watched it."""
         rows = []
         days = EventDay.objects.filter(event=self.event)
         if day_id:
@@ -672,7 +665,7 @@ class LiveAnalyticsService:
             })
         return rows
 
-    # ---------- Visual 8: Feedback ---------- 
+    # ---------- Visual 8: Feedback ----------
     def session_wise_feedback(self, session_id=None, day_id=None):
         qs = Feedback.objects.filter(event=self.event, is_overall_rating=False)
         if session_id:
@@ -684,13 +677,11 @@ class LiveAnalyticsService:
             .annotate(avg_rating=Avg("rating"), count=Count("id"))
             .order_by("schedule_item__day__day_number", "schedule_item__order")
         )
-        # Avg() on a DecimalField returns Decimal, which msgpack can't
-        # serialize for the WS broadcast path. Convert once here.
         for row in rows:
             if row["avg_rating"] is not None:
                 row["avg_rating"] = float(row["avg_rating"])
         return rows
- 
+
     def daywise_feedback(self, day_id=None):
         qs = Feedback.objects.filter(event=self.event, event_date__isnull=False)
         if day_id:
@@ -704,22 +695,36 @@ class LiveAnalyticsService:
             if row["avg_rating"] is not None:
                 row["avg_rating"] = float(row["avg_rating"])
         return rows
- 
+
     # ---------- Visual 9: # of Chats ----------
     def chat_count(self, session_id=None, day_id=None):
         """
-        Total + breakdowns by user, by day, and by session.
-
-        ChatMessage has no `session`/`day` FK, so day/session buckets are
-        derived by matching created_at against EventDay date ranges and
-        this.sessions' scheduled windows — done as a single conditional
-        aggregation (Case/When) rather than one query per day/session,
-        since this rebuilds on every push_live_analytics tick.
+        Total + by_user, optionally scoped to one session's or day's time
+        window. ChatMessage has no session/day FK, so scoping is done by
+        matching created_at against the session's scheduled start/end or
+        the day's date range.
         """
         base_qs = ChatMessage.objects.filter(event=self.event, is_deleted=False)
 
-        total = base_qs.count()
+        if session_id is not None:
+            session = next((s for s in self.sessions if s.id == session_id), None)
+            if session is None:
+                base_qs = base_qs.none()
+            else:
+                start_dt = self._aware(datetime.combine(session.day.date, session.start_time))
+                end_dt = self._aware(datetime.combine(session.day.date, session.end_time))
+                base_qs = base_qs.filter(created_at__gte=start_dt, created_at__lt=end_dt)
+        elif day_id is not None:
+            day = next((s.day for s in self.sessions if s.day_id == day_id), None) \
+                or EventDay.objects.filter(event=self.event, id=day_id).first()
+            if day is None:
+                base_qs = base_qs.none()
+            else:
+                start_dt = self._aware(datetime.combine(day.date, time.min))
+                end_dt = self._aware(datetime.combine(day.date, time.max))
+                base_qs = base_qs.filter(created_at__gte=start_dt, created_at__lt=end_dt)
 
+        total = base_qs.count()
         by_user = list(
             base_qs.values("sender_id", "sender__first_name", "sender__last_name")
             .annotate(count=Count("id"))
@@ -729,73 +734,10 @@ class LiveAnalyticsService:
             row["name"] = f'{row.pop("sender__first_name")} {row.pop("sender__last_name")}'.strip()
             row["user_id"] = row.pop("sender_id")
 
-        # # ---- by day ----
-        # days = EventDay.objects.filter(event=self.event)
-        # if day_id:
-        #     days = days.filter(id=day_id)
-        # days = list(days.order_by("day_number"))
-
-        # day_whens = [
-        #     When(
-        #         created_at__gte=self._aware(datetime.combine(d.date, time.min)),
-        #         created_at__lt=self._aware(datetime.combine(d.date, time.max)),
-        #         then=Value(d.id),
-        #     )
-        #     for d in days
-        # ]
-        # by_day_counts = {}
-        # if day_whens:
-        #     by_day_counts = dict(
-        #         base_qs.annotate(day_bucket=Case(*day_whens, default=Value(None), output_field=IntegerField()))
-        #         .exclude(day_bucket__isnull=True)
-        #         .values("day_bucket")
-        #         .annotate(count=Count("id"))
-        #         .values_list("day_bucket", "count")
-        #     )
-        # by_day = [
-        #     {"day_id": d.id, "day_number": d.day_number, "count": by_day_counts.get(d.id, 0)}
-        #     for d in days
-        # ]
-
-        # # ---- by session ----
-        # sessions = self._sessions_filtered(session_id)
-        # session_whens = [
-        #     When(
-        #         created_at__gte=self._aware(datetime.combine(s.day.date, s.start_time)),
-        #         created_at__lt=self._aware(datetime.combine(s.day.date, s.end_time)),
-        #         then=Value(s.id),
-        #     )
-        #     for s in sessions
-        # ]
-        # by_session_counts = {}
-        # if session_whens:
-        #     by_session_counts = dict(
-        #         base_qs.annotate(session_bucket=Case(*session_whens, default=Value(None), output_field=IntegerField()))
-        #         .exclude(session_bucket__isnull=True)
-        #         .values("session_bucket")
-        #         .annotate(count=Count("id"))
-        #         .values_list("session_bucket", "count")
-        #     )
-        # by_session = [
-        #     {"session_id": s.id, "session_name": s.title, "count": by_session_counts.get(s.id, 0)}
-        #     for s in sessions
-        # ]
-
-        return {
-            "total": total,
-            "by_user": by_user,
-            # "by_day": by_day,
-            # "by_session": by_session,
-        }
+        return {"total": total, "by_user": by_user}
 
     # ---------- Visual 10: Participation Duration (per-user) ----------
     def participation_duration(self, session_id=None, day_id=None):
-        """
-        Per-user watch record: who joined, when, for how long. Unlike
-        participation_time_table (bucketed counts for a chart), this is a
-        flat row-per-ViewerSession listing — meant for a table/export view.
-        select_related('user') to avoid N+1 on full_name/email per row.
-        """
         qs = ViewerSession.objects.filter(event=self.event).select_related("user")
         if session_id:
             qs = qs.filter(session_id=session_id)
@@ -816,39 +758,40 @@ class LiveAnalyticsService:
         return rows
 
     # ---------- Payload assembly ----------
-    def build_payload(self, visuals=None):
-        """visuals: None -> build everything. Otherwise an iterable of visual
-        names -> build only those (intersected against VISUAL_KEYS, so a bad
-        name from a client can't blow this up)."""
+    def build_payload(self, visuals=None, day_id=None, session_id=None):
+        """visuals: None -> build everything. day_id/session_id: optional scope
+        applied to every visual that supports it (intersected against
+        VISUAL_KEYS so a bad name from a client can't blow this up)."""
         wanted = self.VISUAL_KEYS if visuals is None else (self.VISUAL_KEYS & set(visuals))
         payload = {"event_id": self.event.id, "generated_at": self.now.isoformat()}
- 
+
         rate_table = None
         if "participation_rate" in wanted:
-            rate_table = self.participation_rate_table()
- 
+            rate_table = self.participation_rate_table(session_id=session_id, day_id=day_id)
+
         if "statewise_login" in wanted:
-            payload["statewise_login"] = self.statewise_login()
+            payload["statewise_login"] = self.statewise_login(day_id=day_id)
         if "countrywise_login" in wanted:
-            payload["countrywise_login"] = self.countrywise_login()
+            payload["countrywise_login"] = self.countrywise_login(day_id=day_id)
         if "daywise_login" in wanted:
-            payload["daywise_login"] = self.daywise_login()
+            payload["daywise_login"] = self.daywise_login(day_id=day_id)
         if "session_wise_max_virtual" in wanted:
-            payload["session_wise_max_virtual"] = self.session_wise_max_virtual(rate_table=rate_table)
+            payload["session_wise_max_virtual"] = self.session_wise_max_virtual(
+                rate_table=rate_table, session_id=session_id, day_id=day_id
+            )
         if "no_show" in wanted:
-            payload["no_show"] = self.no_show()
+            payload["no_show"] = self.no_show(day_id=day_id)
         if "session_wise_feedback" in wanted:
-            payload["session_wise_feedback"] = self.session_wise_feedback()
+            payload["session_wise_feedback"] = self.session_wise_feedback(session_id=session_id, day_id=day_id)
         if "daywise_feedback" in wanted:
-            payload["daywise_feedback"] = self.daywise_feedback()
+            payload["daywise_feedback"] = self.daywise_feedback(day_id=day_id)
         if "chats" in wanted:
-            payload["chats"] = self.chat_count()
+            payload["chats"] = self.chat_count(session_id=session_id, day_id=day_id)
         if "participation_rate" in wanted:
             payload["participation_rate"] = rate_table
         if "participation_duration" in wanted:
-            payload["participation_duration"] = self.participation_duration()
+            payload["participation_duration"] = self.participation_duration(session_id=session_id, day_id=day_id)
         if "participation_time" in wanted:
-            payload["participation_time"] = self.participation_time_table()
- 
+            payload["participation_time"] = self.participation_time_table(session_id=session_id, day_id=day_id)
+
         return payload
- 
