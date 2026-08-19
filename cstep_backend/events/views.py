@@ -300,9 +300,10 @@ class EventBroadcastViewSet(viewsets.GenericViewSet):
         event.broadcast_sessions.update(is_active=False, ended_at=now)
 
         ViewerSession.objects.filter(event=event, left_at=None).update(left_at=now)
-        # from analytics.broadcast import push_live_analytics
-        # push_live_analytics(event.id)
-        RegistrationDay.objects.filter(day__event=event, registration__user=request.user).update(is_attended=True)
+
+        RegistrationDay.objects.filter(
+            day__event=event, registration__user=request.user,attendance_mode="VIRTUAL"
+        ).update(is_attended=True)
         _send_ws_event(event.id, {"type": "stream.ended"})
 
         return Response({"detail": "Stream ended."})
@@ -432,7 +433,9 @@ class EventViewerViewSet(viewsets.GenericViewSet):
         ViewerSession.objects.filter(event=event, user=request.user, left_at=None).update(
             left_at=timezone.now()
         )
-        RegistrationDay.objects.filter(day__event=event, registration__user=request.user).update(is_attended=True)
+        RegistrationDay.objects.filter(
+            day__event=event, registration__user=request.user,attendance_mode="VIRTUAL"
+        ).update(is_attended=True)
 
         viewer_session = ViewerSession.objects.create(
             user=request.user,
@@ -472,7 +475,9 @@ class EventViewerViewSet(viewsets.GenericViewSet):
 
         now = timezone.now()
         updated = ViewerSession.objects.filter(event=event, user=request.user, left_at=None).update(left_at=now)
-        RegistrationDay.objects.filter(day__event=event, registration__user=request.user).update(is_attended=True)
+        RegistrationDay.objects.filter(
+            day__event=event, registration__user=request.user,attendance_mode="VIRTUAL"
+        ).update(is_attended=True)
         if not updated:
             return Response({"detail": "No active viewer session found."}, status=status.HTTP_404_NOT_FOUND)
 
