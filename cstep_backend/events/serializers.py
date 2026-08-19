@@ -439,14 +439,6 @@ class ViewerSessionLocationSerializer(serializers.Serializer):
             raise serializers.ValidationError("Longitude must be between -180 and 180.")
         return value
 
-    def validate_session_id(self, value):
-        if value is None:
-            return value
-        event = self.context["event"]
-        if not event.schedule_items.filter(pk=value).exists():
-            raise serializers.ValidationError("Session not found for this event.")
-        return value
-
     def validate(self, attrs):
         has_lat = attrs.get("latitude") is not None
         has_lng = attrs.get("longitude") is not None
