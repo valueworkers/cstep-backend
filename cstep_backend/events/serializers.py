@@ -422,6 +422,7 @@ class ViewerSessionLocationSerializer(serializers.Serializer):
     """Input validation for POST /events/{id}/join/."""
     ip_address = serializers.IPAddressField()
     session_id = serializers.IntegerField(required=False, allow_null=True)
+    day_id = serializers.IntegerField(required=False, allow_null=True)
     latitude = serializers.DecimalField(max_digits=9, decimal_places=6, required=False, allow_null=True)
     longitude = serializers.DecimalField(max_digits=9, decimal_places=6, required=False, allow_null=True)
     location_accuracy = serializers.FloatField(required=False, allow_null=True)

@@ -427,6 +427,7 @@ class EventViewerViewSet(viewsets.GenericViewSet):
 
         validated = dict(location.validated_data)
         session_id = validated.pop("session_id", None)
+        day_id = validated.pop("day_id", None)
 
         ViewerSession.objects.filter(event=event, user=request.user, left_at=None).update(
             left_at=timezone.now()
@@ -436,6 +437,7 @@ class EventViewerViewSet(viewsets.GenericViewSet):
         viewer_session = ViewerSession.objects.create(
             user=request.user,
             event=event,
+            day_id=day_id,
             session_id=session_id,
             user_agent=request.META.get("HTTP_USER_AGENT", ""),
             **validated,
