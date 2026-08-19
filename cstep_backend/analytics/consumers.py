@@ -1,4 +1,5 @@
 import logging
+from django.utils import timezone
 from urllib.parse import parse_qs
 
 from channels.db import database_sync_to_async
@@ -73,6 +74,26 @@ class LiveAnalyticsConsumer(AsyncAPIConsumer):
         await database_sync_to_async(register_connection)(self.event_id)
         for visual in self.requested_visuals:
             await database_sync_to_async(add_visual)(self.event_id, visual)
+
+        if self.requested_visuals:
+            visual_data = {}
+
+            for visual in self.requested_visuals:
+                visual_data[visual] = await self._query_visual(
+                    visual,
+                    None,
+                    None,
+                )
+
+            await self.send_json({
+                "type": "update",
+                "data": {
+                    "event_id": self.event_id,
+                    "generated_at": timezone.now().isoformat(),
+                    **visual_data,
+                },
+            })
+            
 
     async def _reject(self, close_code, error_code, message):
         await self.accept()
