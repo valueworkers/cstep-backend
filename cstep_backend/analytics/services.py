@@ -638,11 +638,14 @@ class LiveAnalyticsService:
         qs = ViewerSession.objects.filter(event=self.event, day__isnull=False)
         if day_id:
             qs = qs.filter(day_id=day_id)
-        return list(
+        rows = list(
             qs.values("day_id", "day__day_number", "day__date")
             .annotate(count=Count("user", distinct=True))
             .order_by("day__day_number")
         )
+        for row in rows:
+            row["day__date"] = row["day__date"].isoformat()
+        return rows
 
     # ---------- Visual 7: No Show (per day) ----------
     def no_show(self, day_id=None):
