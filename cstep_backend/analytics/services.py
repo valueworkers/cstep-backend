@@ -654,37 +654,61 @@ class LiveAnalyticsService:
         if day_id:
             days = days.filter(id=day_id)
 
-        event_started = timezone.now() >= self.event.scheduled_start
+        now = timezone.now()
 
         for day in days.order_by("day_number"):
-            if not event_started:
+            # use the day's actual first-session start time if you have one;
+            # falling back to midnight of day.date otherwise
+            day_start = self._aware(datetime.combine(day.date, time.min))
+            day_has_started = now >= day_start
+
+            registered_days = RegistrationDay.objects.filter(day=day).select_related("registration")
+
+            virtual_ids = set(
+                registered_days.filter(attendance_mode=AttendanceMode.VIRTUAL)
+                .values_list("registration__user_id", flat=True)
+            )
+            physical_ids = set(
+                registered_days.filter(attendance_mode=AttendanceMode.PHYSICAL)
+                .values_list("registration__user_id", flat=True)
+            )
+            registered = virtual_ids | physical_ids
+
+            if not day_has_started:
                 rows.append({
                     "day_id": day.id,
                     "day_number": day.day_number,
-                    "registered": 0,
+                    "registered": len(registered),
+                    "virtual_attended ": 0,
+                    "physical_attended ": 0,
                     "attended": 0,
                     "no_show": 0,
                 })
                 continue
 
-            registered = set(
-                RegistrationDay.objects.filter(
-                    day=day, attendance_mode=AttendanceMode.VIRTUAL
+            virtual_attended = set(
+                ViewerSession.objects.filter(day=day, user_id__in=virtual_ids)
+                .values_list("user_id", flat=True)
+            )
+            physical_attended = set(
+                registered_days.filter(
+                    attendance_mode=AttendanceMode.PHYSICAL,
+                    is_attended=True,
                 ).values_list("registration__user_id", flat=True)
             )
-            attended = set(
-                ViewerSession.objects.filter(day=day).values_list("user_id", flat=True)
-            )
+            attended = virtual_attended | physical_attended
+
             rows.append({
                 "day_id": day.id,
                 "day_number": day.day_number,
                 "registered": len(registered),
-                "attended": len(registered & attended),
+                "virtual_attended ": len(virtual_attended),
+                "physical_attended ": len(physical_attended),
+                "attended": len(attended),
                 "no_show": len(registered - attended),
             })
 
-        return rows
-    # ---------- Visual 8: Feedback ----------
+        return rows# ---------- Visual 8: Feedback ----------
     def session_wise_feedback(self, session_id=None, day_id=None):
         qs = Feedback.objects.filter(event=self.event, is_overall_rating=False)
         if session_id:
