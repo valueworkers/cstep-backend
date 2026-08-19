@@ -138,7 +138,11 @@ class EventViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=["get"])
     def upcoming(self, request):
-        queryset = Event.objects.filter(scheduled_start__gte=timezone.now()).annotate(
+        now = timezone.now()
+
+        queryset = Event.objects.filter(
+            scheduled_end__gte=now
+        ).annotate(
             total_registered_users=Count("registrations__user", distinct=True),
             participants_attended=Count(
                 "registrations",
@@ -166,6 +170,7 @@ class EventViewSet(viewsets.ModelViewSet):
                 distinct=True,
             ),
         ).order_by("scheduled_start")
+
         if request.user.is_authenticated:
             user_registered = Registration.objects.filter(event=OuterRef("pk"), user=request.user)
             queryset = queryset.annotate(is_registered=Exists(user_registered))
