@@ -24,10 +24,10 @@ class Registration(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
-    class Meta:
-        constraints = [
-            models.UniqueConstraint(fields=["user", "event"], name="unique_user_event_registration"),
-        ]
+    # class Meta:
+    #     constraints = [
+    #         models.UniqueConstraint(fields=["user", "event"], name="unique_user_event_registration"),
+    #     ]
 
     def create_registration(self, attendance_modes, day_ids=None, session_ids=None):
         """
