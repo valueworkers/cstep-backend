@@ -422,6 +422,7 @@ class ViewerSessionLocationSerializer(serializers.Serializer):
     """Input validation for POST /events/{id}/join/."""
     ip_address = serializers.IPAddressField()
     session_id = serializers.IntegerField(required=False, allow_null=True)
+    day_id = serializers.IntegerField(required=False, allow_null=True)
     latitude = serializers.DecimalField(max_digits=9, decimal_places=6, required=False, allow_null=True)
     longitude = serializers.DecimalField(max_digits=9, decimal_places=6, required=False, allow_null=True)
     location_accuracy = serializers.FloatField(required=False, allow_null=True)
@@ -436,14 +437,6 @@ class ViewerSessionLocationSerializer(serializers.Serializer):
     def validate_longitude(self, value):
         if value is not None and not (-180 <= value <= 180):
             raise serializers.ValidationError("Longitude must be between -180 and 180.")
-        return value
-
-    def validate_session_id(self, value):
-        if value is None:
-            return value
-        event = self.context["event"]
-        if not event.schedule_items.filter(pk=value).exists():
-            raise serializers.ValidationError("Session not found for this event.")
         return value
 
     def validate(self, attrs):
