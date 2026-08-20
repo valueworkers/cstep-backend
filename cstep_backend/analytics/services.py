@@ -545,19 +545,32 @@ class LiveAnalyticsService:
     # ---------- Visual 1: Participation Time ----------
     def participation_time_table(self, session_id=None, day_id=None):
         rows = []
-        combined_totals = {}
+        combined_users_by_bucket = {}
+        all_unique_users = set()
+        total_duration_min = 0
 
         for s in self._sessions_filtered(session_id=session_id, day_id=day_id):
             duration_min = self._session_duration_minutes(s)
+            total_duration_min += duration_min
+
             ticks = self._duration_buckets(duration_min)
-            counts = {tick: 0 for tick in ticks}
+            bucket_users = {tick: set() for tick in ticks}
 
             vs_list = self.viewer_sessions_by_session.get(s.id, [])
             unique_users = {vs.user_id for vs in vs_list}
+            all_unique_users |= unique_users
+
+            user_minutes = {}
             for vs in vs_list:
                 minutes = self._duration_seconds(vs) / 60
+                user_minutes[vs.user_id] = user_minutes.get(vs.user_id, 0) + minutes
+
+            for user_id, minutes in user_minutes.items():
                 tick = ticks[self._bucket_index(minutes, len(ticks))]
-                counts[tick] += 1
+                bucket_users[tick].add(user_id)
+                combined_users_by_bucket.setdefault(tick, set()).add(user_id)
+
+            counts = {tick: len(users) for tick, users in bucket_users.items()}
 
             rows.append({
                 "session_id": s.id,
@@ -567,11 +580,16 @@ class LiveAnalyticsService:
                 "buckets": {str(tick): count for tick, count in counts.items()},
             })
 
-            for tick, count in counts.items():
-                combined_totals[tick] = combined_totals.get(tick, 0) + count
+        total = {
+            "session_duration_min": total_duration_min,
+            "unique_participants": len(all_unique_users),
+            "buckets": {
+                str(tick): len(users) for tick, users in combined_users_by_bucket.items()
+            },
+        }
 
-        return {"rows": rows}
-
+        return {"rows": rows, "total": total}
+    
     # ---------- Visual 2: Participation Rate ----------
     def participation_rate_table(self, interval_minutes=5, session_id=None, day_id=None):
         rows = []
