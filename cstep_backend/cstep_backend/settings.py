@@ -181,35 +181,124 @@ EMAIL_USE_TLS = True
 EMAIL_HOST_USER = "apikey"                          # literally the string "apikey"
 EMAIL_HOST_PASSWORD = os.getenv("SENDGRID_API_KEY")  # your actual key goes here
 DEFAULT_FROM_EMAIL = os.getenv("SENDGRID_FROM_EMAIL")
+# ─── Media Server ─────────────────────────────────────────────────────────────
 
-# ─── Media Server ────────────────────────────────────────────────────────────────────
+def env_bool(name, default=False):
+    return os.getenv(name, str(default)).strip().lower() in {
+        "true",
+        "1",
+        "yes",
+        "on",
+    }
+
+
 OME_HOST = os.getenv("OME_HOST", "168.144.95.80")
 OME_VHOST_NAME = os.getenv("OME_VHOST_NAME", "default")
 OME_APP_NAME = os.getenv("OME_APP_NAME", "app")
 
-OME_API_ENABLE_TLS = os.getenv("OME_API_ENABLE_TLS", "False") == "True"
+
+# ─── OME API ──────────────────────────────────────────────────────────────────
+
+OME_API_ENABLE_TLS = env_bool("OME_API_ENABLE_TLS", False)
 OME_API_PORT = os.getenv("OME_API_PORT", "8081")
 OME_API_ACCESS_TOKEN = os.getenv("OME_API_ACCESS_TOKEN")
 
-OME_RTMP_PROVIDER_PORT = os.getenv("OME_RTMP_PROVIDER_PORT", "1935")
-OME_SRT_PROVIDER_PORT = os.getenv("OME_SRT_PROVIDER_PORT", "9999")
 
-OME_WEBRTC_PROVIDER_ENABLE_TLS = (
-    os.getenv("OME_WEBRTC_PROVIDER_ENABLE_TLS", "False") == "True"
+# ─── Ingest / Providers ──────────────────────────────────────────────────────
+
+# RTMP
+OME_RTMP_PROVIDER_PORT = os.getenv(
+    "OME_RTMP_PROVIDER_PORT",
+    "1935",
 )
-OME_WEBRTC_PROVIDER_PORT = os.getenv("OME_WEBRTC_PROVIDER_PORT", "3333")
 
-OME_WEBRTC_PUBLISHER_ENABLE_TLS = (
-    os.getenv("OME_WEBRTC_PUBLISHER_ENABLE_TLS", "False") == "True"
+# SRT
+OME_SRT_PROVIDER_PORT = os.getenv(
+    "OME_SRT_PROVIDER_PORT",
+    "9999",
 )
-OME_WEBRTC_PUBLISHER_PORT = os.getenv("OME_WEBRTC_PUBLISHER_PORT", "3333")
 
-OME_LLHLS_PUBLISHER_ENABLE_TLS = (
-    os.getenv("OME_LLHLS_PUBLISHER_ENABLE_TLS", "False") == "True"
+# MPEG-TS over UDP
+OME_MPEGTS_PROVIDER_PORT = os.getenv(
+    "OME_MPEGTS_PROVIDER_PORT",
+    "4000",
 )
-OME_LLHLS_PUBLISHER_PORT = os.getenv("OME_LLHLS_PUBLISHER_PORT", "3333")
-OME_ADMISSION_WEBHOOK_SECRET = os.getenv("OME_ADMISSION_WEBHOOK_SECRET", "")
 
+
+# ─── WebRTC / WHIP Ingest ────────────────────────────────────────────────────
+
+OME_WEBRTC_PROVIDER_ENABLE_TLS = env_bool(
+    "OME_WEBRTC_PROVIDER_ENABLE_TLS",
+    False,
+)
+
+OME_WEBRTC_PROVIDER_PORT = os.getenv(
+    "OME_WEBRTC_PROVIDER_PORT",
+    "3333",
+)
+
+
+# ─── WebRTC / WHEP Playback ──────────────────────────────────────────────────
+
+OME_WEBRTC_PUBLISHER_ENABLE_TLS = env_bool(
+    "OME_WEBRTC_PUBLISHER_ENABLE_TLS",
+    False,
+)
+
+OME_WEBRTC_PUBLISHER_PORT = os.getenv(
+    "OME_WEBRTC_PUBLISHER_PORT",
+    "3333",
+)
+
+
+# ─── LL-HLS Playback ─────────────────────────────────────────────────────────
+
+OME_LLHLS_PUBLISHER_ENABLE_TLS = env_bool(
+    "OME_LLHLS_PUBLISHER_ENABLE_TLS",
+    False,
+)
+
+OME_LLHLS_PUBLISHER_PORT = os.getenv(
+    "OME_LLHLS_PUBLISHER_PORT",
+    "3333",
+)
+
+
+# ─── HLS Playback ────────────────────────────────────────────────────────────
+
+OME_HLS_PUBLISHER_ENABLE_TLS = env_bool(
+    "OME_HLS_PUBLISHER_ENABLE_TLS",
+    False,
+)
+
+OME_HLS_PUBLISHER_PORT = os.getenv(
+    "OME_HLS_PUBLISHER_PORT",
+    "3333",
+)
+
+
+# ─── SRT Publisher / Output ──────────────────────────────────────────────────
+
+OME_SRT_PUBLISHER_PORT = os.getenv(
+    "OME_SRT_PUBLISHER_PORT",
+    "9998",
+)
+
+
+# ─── OVT ─────────────────────────────────────────────────────────────────────
+
+OME_OVT_PORT = os.getenv(
+    "OME_OVT_PORT",
+    "9000",
+)
+
+
+# ─── Authentication / Admission ──────────────────────────────────────────────
+
+OME_ADMISSION_WEBHOOK_SECRET = os.getenv(
+    "OME_ADMISSION_WEBHOOK_SECRET",
+    "",
+)
 # ─── CORS ─────────────────────────────────────────────────────────────────────
 CORS_ALLOW_ALL_ORIGINS = True  # Tighten in production
 
