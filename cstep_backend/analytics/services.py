@@ -675,8 +675,6 @@ class LiveAnalyticsService:
         now = timezone.now()
 
         for day in days.order_by("day_number"):
-            # use the day's actual first-session start time if you have one;
-            # falling back to midnight of day.date otherwise
             day_start = self._aware(datetime.combine(day.date, time.min))
             day_has_started = now >= day_start
 
@@ -705,8 +703,10 @@ class LiveAnalyticsService:
                 continue
 
             virtual_attended = set(
-                ViewerSession.objects.filter(day=day, user_id__in=virtual_ids)
-                .values_list("user_id", flat=True)
+                registered_days.filter(
+                    attendance_mode=AttendanceMode.VIRTUAL,
+                    is_attended=True,
+                ).values_list("registration__user_id", flat=True)
             )
             physical_attended = set(
                 registered_days.filter(
@@ -726,7 +726,9 @@ class LiveAnalyticsService:
                 "no_show": len(registered - attended),
             })
 
-        return rows# ---------- Visual 8: Feedback ----------
+        return rows
+
+    # ---------- Visual 8: Feedback ----------
     def session_wise_feedback(self, session_id=None, day_id=None):
         qs = Feedback.objects.filter(event=self.event, is_overall_rating=False)
         if session_id:
@@ -805,6 +807,14 @@ class LiveAnalyticsService:
         if day_id:
             qs = qs.filter(day_id=day_id)
 
+        # Build the set of registered user_ids, scoped the same way as the sessions query
+        reg_days = RegistrationDay.objects.filter(day__event=self.event)
+        if day_id:
+            reg_days = reg_days.filter(day_id=day_id)
+        registered_user_ids = set(
+            reg_days.values_list("registration__user_id", flat=True)
+        )
+
         rows = []
         for vs in qs:
             user = vs.user
@@ -815,9 +825,9 @@ class LiveAnalyticsService:
                 "joined_at": vs.joined_at.isoformat(),
                 "left_at": vs.left_at.isoformat() if vs.left_at else None,
                 "watch_duration_seconds": self._duration_seconds(vs),
+                "is_registered": user.id in registered_user_ids,
             })
         return rows
-
     # ---------- Payload assembly ----------
     def build_payload(self, visuals=None, day_id=None, session_id=None):
         """visuals: None -> build everything. day_id/session_id: optional scope
