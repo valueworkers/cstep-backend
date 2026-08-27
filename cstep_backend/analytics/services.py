@@ -545,19 +545,32 @@ class LiveAnalyticsService:
     # ---------- Visual 1: Participation Time ----------
     def participation_time_table(self, session_id=None, day_id=None):
         rows = []
-        combined_totals = {}
+        combined_users_by_bucket = {}
+        all_unique_users = set()
+        total_duration_min = 0
 
         for s in self._sessions_filtered(session_id=session_id, day_id=day_id):
             duration_min = self._session_duration_minutes(s)
+            total_duration_min += duration_min
+
             ticks = self._duration_buckets(duration_min)
-            counts = {tick: 0 for tick in ticks}
+            bucket_users = {tick: set() for tick in ticks}
 
             vs_list = self.viewer_sessions_by_session.get(s.id, [])
             unique_users = {vs.user_id for vs in vs_list}
+            all_unique_users |= unique_users
+
+            user_minutes = {}
             for vs in vs_list:
                 minutes = self._duration_seconds(vs) / 60
+                user_minutes[vs.user_id] = user_minutes.get(vs.user_id, 0) + minutes
+
+            for user_id, minutes in user_minutes.items():
                 tick = ticks[self._bucket_index(minutes, len(ticks))]
-                counts[tick] += 1
+                bucket_users[tick].add(user_id)
+                combined_users_by_bucket.setdefault(tick, set()).add(user_id)
+
+            counts = {tick: len(users) for tick, users in bucket_users.items()}
 
             rows.append({
                 "session_id": s.id,
@@ -567,11 +580,16 @@ class LiveAnalyticsService:
                 "buckets": {str(tick): count for tick, count in counts.items()},
             })
 
-            for tick, count in counts.items():
-                combined_totals[tick] = combined_totals.get(tick, 0) + count
+        total = {
+            "session_duration_min": total_duration_min,
+            "unique_participants": len(all_unique_users),
+            "buckets": {
+                str(tick): len(users) for tick, users in combined_users_by_bucket.items()
+            },
+        }
 
-        return {"rows": rows}
-
+        return {"rows": rows, "total": total}
+    
     # ---------- Visual 2: Participation Rate ----------
     def participation_rate_table(self, interval_minutes=5, session_id=None, day_id=None):
         rows = []
@@ -657,8 +675,6 @@ class LiveAnalyticsService:
         now = timezone.now()
 
         for day in days.order_by("day_number"):
-            # use the day's actual first-session start time if you have one;
-            # falling back to midnight of day.date otherwise
             day_start = self._aware(datetime.combine(day.date, time.min))
             day_has_started = now >= day_start
 
@@ -687,8 +703,10 @@ class LiveAnalyticsService:
                 continue
 
             virtual_attended = set(
-                ViewerSession.objects.filter(day=day, user_id__in=virtual_ids)
-                .values_list("user_id", flat=True)
+                registered_days.filter(
+                    attendance_mode=AttendanceMode.VIRTUAL,
+                    is_attended=True,
+                ).values_list("registration__user_id", flat=True)
             )
             physical_attended = set(
                 registered_days.filter(
@@ -708,7 +726,9 @@ class LiveAnalyticsService:
                 "no_show": len(registered - attended),
             })
 
-        return rows# ---------- Visual 8: Feedback ----------
+        return rows
+
+    # ---------- Visual 8: Feedback ----------
     def session_wise_feedback(self, session_id=None, day_id=None):
         qs = Feedback.objects.filter(event=self.event, is_overall_rating=False)
         if session_id:
@@ -787,6 +807,14 @@ class LiveAnalyticsService:
         if day_id:
             qs = qs.filter(day_id=day_id)
 
+        # Build the set of registered user_ids, scoped the same way as the sessions query
+        reg_days = RegistrationDay.objects.filter(day__event=self.event)
+        if day_id:
+            reg_days = reg_days.filter(day_id=day_id)
+        registered_user_ids = set(
+            reg_days.values_list("registration__user_id", flat=True)
+        )
+
         rows = []
         for vs in qs:
             user = vs.user
@@ -797,9 +825,9 @@ class LiveAnalyticsService:
                 "joined_at": vs.joined_at.isoformat(),
                 "left_at": vs.left_at.isoformat() if vs.left_at else None,
                 "watch_duration_seconds": self._duration_seconds(vs),
+                "is_registered": user.id in registered_user_ids,
             })
         return rows
-
     # ---------- Payload assembly ----------
     def build_payload(self, visuals=None, day_id=None, session_id=None):
         """visuals: None -> build everything. day_id/session_id: optional scope
