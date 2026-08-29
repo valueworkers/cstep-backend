@@ -345,11 +345,11 @@ def _peak_concurrent_viewers(viewer_qs):
 def _format_minutes(seconds):
     return f"{seconds // 60}m"
 
-
 def streaming_summary(event_id=None):
     """Streaming Details table + the quick Streaming cards."""
     viewer_qs = _scope_viewer_sessions(event_id)
     broadcast_qs = _scope_broadcast_sessions(event_id)
+    registration_qs = _scope_registrations(event_id)
 
     watch_stats = viewer_qs.aggregate(
         avg_watch=Avg("watch_duration_seconds"),
@@ -358,9 +358,16 @@ def streaming_summary(event_id=None):
     avg_seconds = int(watch_stats["avg_watch"] or 0)
     total_seconds = int(watch_stats["total_watch"] or 0)
 
+    viewer_user_ids = set(viewer_qs.values_list("user_id", flat=True).distinct())
+    registered_user_ids = set(registration_qs.values_list("user_id", flat=True))
+    registered_viewers = viewer_user_ids & registered_user_ids
+    unregistered_viewers = viewer_user_ids - registered_user_ids
+
     return {
         "currently_watching": viewer_qs.filter(left_at__isnull=True).count(),
-        "unique_viewers": viewer_qs.values("user_id").distinct().count(),
+        "unique_viewers": len(viewer_user_ids),
+        "registered_viewers": len(registered_viewers),
+        "unregistered_viewers": len(unregistered_viewers),
         "broadcast_sessions": broadcast_qs.count(),
         "peak_concurrent_viewers": _peak_concurrent_viewers(viewer_qs),
         "avg_watch_time_seconds": avg_seconds,
@@ -370,8 +377,8 @@ def streaming_summary(event_id=None):
         "live_broadcast": broadcast_qs.filter(is_active=True).exists(),
     }
 
+    
 # --------------------------------------------------------------- feedback ---
-
 def get_feedback_analytics(event_id, event_day_id=None, schedule_item_id=None):
     """Generic filtered analytics — used for session-level and day-level queries."""
     qs = Feedback.objects.filter(event_id=event_id)
@@ -702,11 +709,12 @@ class LiveAnalyticsService:
                 })
                 continue
 
+            # Virtual attendance = actual ViewerSession rows for this day
+            # (ground truth for who joined the stream), not the RegistrationDay
+            # is_attended flag, which can be stale or manually set.
             virtual_attended = set(
-                registered_days.filter(
-                    attendance_mode=AttendanceMode.VIRTUAL,
-                    is_attended=True,
-                ).values_list("registration__user_id", flat=True)
+                ViewerSession.objects.filter(event=self.event, day=day)
+                .values_list("user_id", flat=True)
             )
             physical_attended = set(
                 registered_days.filter(
@@ -828,6 +836,7 @@ class LiveAnalyticsService:
                 "is_registered": user.id in registered_user_ids,
             })
         return rows
+
     # ---------- Payload assembly ----------
     def build_payload(self, visuals=None, day_id=None, session_id=None):
         """visuals: None -> build everything. day_id/session_id: optional scope
