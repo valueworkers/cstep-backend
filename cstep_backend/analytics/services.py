@@ -709,11 +709,12 @@ class LiveAnalyticsService:
                 })
                 continue
 
+            # Virtual attendance = actual ViewerSession rows for this day
+            # (ground truth for who joined the stream), not the RegistrationDay
+            # is_attended flag, which can be stale or manually set.
             virtual_attended = set(
-                registered_days.filter(
-                    attendance_mode=AttendanceMode.VIRTUAL,
-                    is_attended=True,
-                ).values_list("registration__user_id", flat=True)
+                ViewerSession.objects.filter(event=self.event, day=day)
+                .values_list("user_id", flat=True)
             )
             physical_attended = set(
                 registered_days.filter(
