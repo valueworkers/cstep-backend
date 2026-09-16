@@ -1,12 +1,10 @@
 amqp==5.3.1
 asgiref==3.12.1
 attrs==26.1.0
-autobahn==26.7.1
 Automat==25.4.16
 billiard==4.2.4
 boto3==1.43.73
 botocore==1.43.73
-cbor2==6.1.4
 celery==5.6.3
 certifi==2026.7.22
 cffi==2.1.1
