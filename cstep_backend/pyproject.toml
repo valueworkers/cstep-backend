@@ -1,0 +1,4 @@
+[tool.uv]
+
+environments = ["sys_platform == 'linux' and platform_python_implementation == 'CPython'"]
+ 
